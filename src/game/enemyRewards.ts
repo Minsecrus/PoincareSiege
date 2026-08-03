@@ -1,32 +1,55 @@
 /** Natural resource income, expressed in whole resource units per second. */
 export const PASSIVE_RESOURCE_PER_SECOND = 5;
 
-/** Enemy traits that determine its resource reward when defeated. */
-export interface EnemyRewardProfile {
-  maxHealth: number;
-  speed: number;
+/** The gentle bounty curve used only for campaign-scaled enemy spawns. */
+export const WAVE_ENEMY_REWARD_LOG_FACTOR = 0.45;
+export const MAX_WAVE_ENEMY_REWARD_MULTIPLIER = 3.25;
+
+/** Inputs for the bounded campaign bounty curve. */
+export interface WaveEnemyRewardProfile {
+  /** The family's normal, whole-resource bounty. */
+  readonly baseReward: number;
+  /** The family's unscaled maximum health. */
+  readonly baseHealth: number;
+  /** The maximum health resolved for this individual runtime spawn. */
+  readonly actualHealth: number;
 }
 
 /**
- * Gives tougher and faster enemies a larger whole-resource bounty.
- *
- * The basic enemy currently uses a fixed 0.1 speed: early enemies around
- * 100 health yield 6 resources, while later 208-health enemies yield 11.
- * Invalid or non-positive health and invalid/negative speed
- * deliberately yield no reward rather than introducing bad currency state.
+ * Rewards wave-scaled health without turning high-health waves into an
+ * unlimited resource fountain. Health below a family's baseline never lowers
+ * its bounty; later multipliers grow logarithmically and stop at 3.25x.
  */
-export function getEnemyDefeatReward({
-  maxHealth,
-  speed,
-}: EnemyRewardProfile): number {
+export function getWaveEnemyReward({
+  baseReward,
+  baseHealth,
+  actualHealth,
+}: WaveEnemyRewardProfile): number {
   if (
-    !Number.isFinite(maxHealth) ||
-    maxHealth <= 0 ||
-    !Number.isFinite(speed) ||
-    speed < 0
+    !Number.isFinite(baseReward) ||
+    baseReward <= 0 ||
+    !Number.isFinite(baseHealth) ||
+    baseHealth <= 0 ||
+    !Number.isFinite(actualHealth) ||
+    actualHealth <= 0
   ) {
     return 0;
   }
 
-  return Math.max(0, Math.floor(maxHealth / 20 + speed * 10));
+  const healthRatio = actualHealth / baseHealth;
+  const logarithmicMultiplier =
+    1 + WAVE_ENEMY_REWARD_LOG_FACTOR * Math.log2(healthRatio);
+  const multiplier = Math.min(
+    MAX_WAVE_ENEMY_REWARD_MULTIPLIER,
+    Math.max(1, logarithmicMultiplier),
+  );
+  const roundedBaseReward = Math.round(baseReward);
+  const cappedReward = Math.round(
+    baseReward * MAX_WAVE_ENEMY_REWARD_MULTIPLIER,
+  );
+
+  return Math.max(
+    roundedBaseReward,
+    Math.min(cappedReward, Math.round(baseReward * multiplier)),
+  );
 }

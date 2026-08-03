@@ -28,13 +28,15 @@ describe('tower economy', () => {
   });
 
   it('gives each tower family a construction price and two upgrade prices', () => {
-    expect(TOWER_KINDS).toHaveLength(6);
+    expect(TOWER_KINDS).toHaveLength(8);
     expect(getTowerBuildCost('sector')).toBe(100);
     expect(getTowerBuildCost('prism')).toBe(130);
     expect(getTowerBuildCost('pulse')).toBe(150);
     expect(getTowerBuildCost('anchor')).toBe(120);
     expect(getTowerBuildCost('arc')).toBe(170);
     expect(getTowerBuildCost('sniper')).toBe(240);
+    expect(getTowerBuildCost('support')).toBe(200);
+    expect(getTowerBuildCost('bulwark')).toBe(230);
 
     expect(getTowerUpgradeCost('prism', 1)).toBe(110);
     expect(getTowerUpgradeCost('prism', 2)).toBe(170);
@@ -46,6 +48,10 @@ describe('tower economy', () => {
     expect(getTowerUpgradeCost('arc', 2)).toBe(210);
     expect(getTowerUpgradeCost('sniper', 1)).toBe(190);
     expect(getTowerUpgradeCost('sniper', 2)).toBe(300);
+    expect(getTowerUpgradeCost('support', 1)).toBe(150);
+    expect(getTowerUpgradeCost('support', 2)).toBe(230);
+    expect(getTowerUpgradeCost('bulwark', 1)).toBe(180);
+    expect(getTowerUpgradeCost('bulwark', 2)).toBe(280);
 
     for (const kind of TOWER_KINDS) {
       expect(getTowerUpgradeCost(kind, 3)).toBeNull();
@@ -63,6 +69,10 @@ describe('tower economy', () => {
     expect(getTowerRefund('arc', 3)).toBe(260);
     expect(getTowerInvestedCost('sniper', 3)).toBe(730);
     expect(getTowerRefund('sniper', 3)).toBe(365);
+    expect(getTowerInvestedCost('support', 3)).toBe(580);
+    expect(getTowerRefund('support', 3)).toBe(290);
+    expect(getTowerInvestedCost('bulwark', 3)).toBe(690);
+    expect(getTowerRefund('bulwark', 3)).toBe(345);
   });
 
   it('normalizes invalid tower levels before calculating price or refund', () => {

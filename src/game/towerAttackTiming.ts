@@ -16,6 +16,8 @@ export interface TowerAttackTimingRequest {
   readonly kind: TowerKind;
   readonly origin: Readonly<Vec2>;
   readonly targets: readonly Readonly<Vec2>[];
+  /** Friendly visual contacts carried by support pulses; never damage them. */
+  readonly supportTargets?: readonly Readonly<Vec2>[];
   readonly range?: number;
   readonly style?: PrecisionProjectileStyle;
 }
@@ -49,6 +51,18 @@ export const TOWER_ATTACK_EFFECT_TIMING = Object.freeze({
   arc: Object.freeze({
     durationSeconds: 0.48,
     propagationProgress: 0.42,
+  }),
+  support: Object.freeze({
+    durationSeconds: 0.9,
+    /** The cyan leading ring reaches authored range at this progress. */
+    wavefrontEndProgress: 0.72,
+    rangeFallback: 1.05,
+  }),
+  bulwark: Object.freeze({
+    durationSeconds: 0.98,
+    /** The low-intensity shield front reaches authored range at this progress. */
+    wavefrontEndProgress: 0.76,
+    rangeFallback: 0.85,
   }),
   sniperProjectile: Object.freeze({
     durationSeconds: 0.46,
@@ -154,6 +168,42 @@ function anchorImpactDelay(
   return timing.durationSeconds * progress;
 }
 
+function supportImpactDelay(
+  origin: Readonly<Vec2>,
+  target: Readonly<Vec2>,
+  range: number,
+): number {
+  const timing = TOWER_ATTACK_EFFECT_TIMING.support;
+  const covered = clamp(
+    hyperbolicDistance(origin, target) / Math.max(range, 0.001),
+    0,
+    1,
+  );
+  return (
+    timing.durationSeconds *
+    timing.wavefrontEndProgress *
+    inverseEaseOutCubic(covered)
+  );
+}
+
+function bulwarkImpactDelay(
+  origin: Readonly<Vec2>,
+  target: Readonly<Vec2>,
+  range: number,
+): number {
+  const timing = TOWER_ATTACK_EFFECT_TIMING.bulwark;
+  const covered = clamp(
+    hyperbolicDistance(origin, target) / Math.max(range, 0.001),
+    0,
+    1,
+  );
+  return (
+    timing.durationSeconds *
+    timing.wavefrontEndProgress *
+    inverseEaseOutCubic(covered)
+  );
+}
+
 /**
  * Returns the instant each captured target is first reached by its matching
  * effect. These delays are simulation-time values and therefore remain in
@@ -212,6 +262,28 @@ export function getTowerAttackImpactDelays(
         timing.durationSeconds *
         timing.propagationProgress *
         inverseEaseOutCubic((index + 1) / targetCount),
+      );
+    }
+    case 'support': {
+      const range = resolveTowerAttackEffectRange(
+        request.origin,
+        request.targets,
+        request.range,
+        TOWER_ATTACK_EFFECT_TIMING.support.rangeFallback,
+      );
+      return request.targets.map((target) =>
+        supportImpactDelay(request.origin, target, range),
+      );
+    }
+    case 'bulwark': {
+      const range = resolveTowerAttackEffectRange(
+        request.origin,
+        request.targets,
+        request.range,
+        TOWER_ATTACK_EFFECT_TIMING.bulwark.rangeFallback,
+      );
+      return request.targets.map((target) =>
+        bulwarkImpactDelay(request.origin, target, range),
       );
     }
     case 'sniper': {

@@ -1,4 +1,5 @@
 import type { EnemySpawnDescriptor } from './enemyBehaviors';
+import { getWaveEnemyReward } from './enemyRewards';
 import { getEnemyType, type EnemyKind } from './enemyTypes';
 import {
   buildEnemyRoute,
@@ -22,6 +23,10 @@ export interface EnemyRuntimeSpawn {
   readonly kind: EnemyKind;
   readonly route: EnemyRoute;
   readonly maxHealth: number;
+  /** Contact damage after this wave's safe pressure multiplier is applied. */
+  readonly contactDamage: number;
+  /** Bounty derived from this spawn's resolved health. */
+  readonly reward: number;
 }
 
 function scaledHealth(
@@ -41,14 +46,42 @@ function scaledHealth(
   );
 }
 
+function safeMultiplier(multiplier: number | undefined): number {
+  return multiplier !== undefined && Number.isFinite(multiplier)
+    ? Math.max(0, multiplier)
+    : 1;
+}
+
+function scaledReward(kind: EnemyKind, maxHealth: number): number {
+  const type = getEnemyType(kind);
+  return getWaveEnemyReward({
+    baseReward: type.reward,
+    baseHealth: type.baseHealth,
+    actualHealth: maxHealth,
+  });
+}
+
+function scaledContactDamage(
+  kind: EnemyKind,
+  waveContactMultiplier: number | undefined,
+): number {
+  const contactDamage =
+    getEnemyType(kind).contactDamage * safeMultiplier(waveContactMultiplier);
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.round(contactDamage));
+}
+
 /** Resolves one authored wave entry without introducing a wave-based speed. */
 export function createWaveEnemySpawn(
   spawn: CampaignWaveSpawn,
   entryAngle: number,
 ): EnemyRuntimeSpawn {
+  const maxHealth = scaledHealth(spawn.kind, spawn.healthMultiplier);
+  const contactMultiplier = spawn.contactMultiplier;
   return {
     kind: spawn.kind,
-    maxHealth: scaledHealth(spawn.kind, spawn.healthMultiplier),
+    maxHealth,
+    contactDamage: scaledContactDamage(spawn.kind, contactMultiplier),
+    reward: scaledReward(spawn.kind, maxHealth),
     route: buildEnemyRoute({
       entryAngle,
       behavior: spawn.routeBehavior,
@@ -83,20 +116,27 @@ function forkPosition(descriptor: EnemySpawnDescriptor): Vec2 {
 export function createReinforcementEnemySpawn(
   descriptor: EnemySpawnDescriptor,
   waveHealthMultiplier: number,
+  waveContactMultiplier?: number,
 ): EnemyRuntimeSpawn {
   const position = forkPosition(descriptor);
   const startRadius = Math.max(
     MINIMUM_ROUTE_RADIUS,
     hyperbolicDistance(position, CENTER),
   );
+  const maxHealth = scaledHealth(
+    descriptor.kind,
+    waveHealthMultiplier,
+    descriptor.healthScale,
+  );
 
   return {
     kind: descriptor.kind,
-    maxHealth: scaledHealth(
+    maxHealth,
+    contactDamage: scaledContactDamage(
       descriptor.kind,
-      waveHealthMultiplier,
-      descriptor.healthScale,
+      waveContactMultiplier,
     ),
+    reward: scaledReward(descriptor.kind, maxHealth),
     route: buildEnemyRoute({
       entryAngle: Math.atan2(position.y, position.x),
       startRadius,

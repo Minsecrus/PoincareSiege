@@ -9,12 +9,14 @@ import {
 import type { BaseSkillId } from './baseProgression';
 import type { TowerKind } from './towerEconomy';
 import type { TowerEnchantmentKind } from './towerEnchantments';
+import type { SpecialTileKind } from './specialTiles';
 
 /** The combat systems exposed by one authored campaign level. */
 export interface CampaignLevelLoadout {
   readonly towerKinds: readonly TowerKind[];
   readonly enchantments: readonly TowerEnchantmentKind[];
   readonly baseSkills: readonly BaseSkillId[];
+  readonly specialTiles: readonly SpecialTileKind[];
 }
 
 export interface CampaignLevel {
@@ -42,6 +44,7 @@ function defineLevel(
       towerKinds: Object.freeze([...loadout.towerKinds]),
       enchantments: Object.freeze([...loadout.enchantments]),
       baseSkills: Object.freeze([...loadout.baseSkills]),
+      specialTiles: Object.freeze([...loadout.specialTiles]),
     }),
     waves,
   });
@@ -57,34 +60,66 @@ export const CAMPAIGN_LEVELS: readonly CampaignLevel[] = Object.freeze([
     towerKinds: ['sector'],
     enchantments: [],
     baseSkills: [],
+    specialTiles: [],
   }),
   defineLevel('level-2', 500, {
     towerKinds: ['sector', 'prism'],
     enchantments: ['selfRepair'],
     baseSkills: [],
+    specialTiles: [],
   }),
   defineLevel('level-3', 500, {
     towerKinds: ['sector', 'prism', 'pulse'],
     enchantments: ['selfRepair', 'attackSpeed'],
     baseSkills: ['vitality'],
+    specialTiles: ['repair'],
   }),
   defineLevel('level-4', 500, {
     towerKinds: ['sector', 'prism', 'pulse', 'anchor'],
     enchantments: ['selfRepair', 'attackSpeed', 'fortify'],
     baseSkills: ['vitality', 'regeneration'],
+    specialTiles: ['repair', 'haste'],
   }),
   defineLevel('level-5', 540, {
-    towerKinds: ['sector', 'prism', 'pulse', 'anchor', 'arc'],
+    towerKinds: [
+      'sector',
+      'prism',
+      'pulse',
+      'anchor',
+      'arc',
+      'support',
+      'bulwark',
+    ],
     enchantments: ['selfRepair', 'allyHeal', 'attackSpeed', 'fortify'],
     baseSkills: ['vitality', 'regeneration', 'areaPulse'],
+    specialTiles: ['repair', 'haste', 'power'],
   }),
   defineLevel('level-6', 620, {
-    towerKinds: ['sector', 'prism', 'pulse', 'anchor', 'arc', 'sniper'],
+    towerKinds: [
+      'sector',
+      'prism',
+      'pulse',
+      'anchor',
+      'arc',
+      'sniper',
+      'support',
+      'bulwark',
+    ],
     enchantments: ['selfRepair', 'allyHeal', 'attackSpeed', 'fortify'],
     baseSkills: ['vitality', 'regeneration', 'areaPulse'],
+    specialTiles: ['repair', 'haste', 'power'],
   }),
   defineLevel('level-7', 750, {
-    towerKinds: ['sector', 'prism', 'pulse', 'anchor', 'arc', 'sniper'],
+    towerKinds: [
+      'sector',
+      'prism',
+      'pulse',
+      'anchor',
+      'arc',
+      'sniper',
+      'support',
+      'bulwark',
+    ],
     enchantments: [
       'selfRepair',
       'allyHeal',
@@ -93,6 +128,7 @@ export const CAMPAIGN_LEVELS: readonly CampaignLevel[] = Object.freeze([
       'knockback',
     ],
     baseSkills: ['vitality', 'regeneration', 'areaPulse'],
+    specialTiles: ['repair', 'haste', 'power'],
   }),
 ]);
 

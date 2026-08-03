@@ -472,6 +472,40 @@ button {
   width: max-content;
 }
 
+.build-menu[data-special-tile]::before {
+  position: absolute;
+  z-index: 1;
+  top: -10px;
+  right: 9px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(13, 46, 53, 0.96);
+  color: #dffff8;
+  content: "";
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1;
+  place-items: center;
+  text-shadow: 0 0 7px currentColor;
+}
+
+.build-menu[data-special-tile="power"]::before {
+  color: #ffad83;
+  content: "◆";
+}
+
+.build-menu[data-special-tile="haste"]::before {
+  color: #ffe177;
+  content: "»";
+}
+
+.build-menu[data-special-tile="repair"]::before {
+  color: #7ef0bd;
+  content: "+";
+}
+
 .build-option,
 .action-button,
 .base-skill {
@@ -654,6 +688,14 @@ button {
   width: 13px;
   height: 13px;
   fill: #7bd9cd;
+}
+
+.tower-readout__stat[data-damage-type="kinetic"] svg {
+  fill: #f1c57d;
+}
+
+.tower-readout__stat[data-damage-type="energy"] svg {
+  fill: #8fcfff;
 }
 
 .tower-enchantments {

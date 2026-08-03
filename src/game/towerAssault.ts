@@ -34,6 +34,11 @@ export interface TowerAssaultTower {
    * has already been removed during the same simulation step.
    */
   readonly health?: number;
+  /**
+   * Optional H² radius for a defensive taunt. A living tower inside this
+   * radius outranks ordinary engagement-range targets.
+   */
+  readonly tauntRadius?: number;
 }
 
 /** The single tuning input kept separate from the movement/combat resolver. */
@@ -107,6 +112,13 @@ function compareTargets(
   return left.towerId.localeCompare(right.towerId);
 }
 
+function getTauntRadius(tower: TowerAssaultTower): number | null {
+  const radius = tower.tauntRadius;
+  return Number.isFinite(radius) && radius !== undefined && radius >= 0
+    ? radius
+    : null;
+}
+
 /**
  * Converts a family contact threat into a tower-eating hit. Higher-contact
  * enemies hit proportionally harder and modestly more often; the cadence has
@@ -134,9 +146,11 @@ export function getTowerAssaultProfile(
 }
 
 /**
- * Resolves the closest living tower inside the enemy's H² engagement circle.
- * It mutates neither collection and intentionally owns no timer state: the
- * scene can preserve attack progress while a target remains engaged.
+ * Resolves a living tower-assault target in H². A taunt-eligible defensive
+ * tower wins first; otherwise this preserves the original closest living
+ * target inside the engagement circle. It mutates neither collection and
+ * intentionally owns no timer state, so the scene can preserve attack
+ * progress while a target remains engaged.
  */
 export function resolveTowerAssault(
   enemy: TowerAssaultEnemy,
@@ -159,13 +173,27 @@ export function resolveTowerAssault(
   const engagementRange = normalizeEngagementRange(options);
   const candidates = towers
     .filter(isAttackableTower)
-    .map((tower): TowerAssaultTarget => ({
-      towerId: tower.id,
-      distance: hyperbolicDistance(enemy.position, tower.position),
-    }))
+    .map((tower) => ({
+      target: {
+        towerId: tower.id,
+        distance: hyperbolicDistance(enemy.position, tower.position),
+      } satisfies TowerAssaultTarget,
+      tauntRadius: getTauntRadius(tower),
+    }));
+  const tauntTargets = candidates
+    .filter(
+      (candidate) =>
+        candidate.tauntRadius !== null &&
+        candidate.target.distance <=
+          candidate.tauntRadius + COMPARISON_EPSILON,
+    )
+    .map((candidate) => candidate.target)
+    .sort(compareTargets);
+  const normalTargets = candidates
+    .map((candidate) => candidate.target)
     .filter((target) => target.distance <= engagementRange + COMPARISON_EPSILON)
     .sort(compareTargets);
-  const target = candidates[0] ?? null;
+  const target = tauntTargets[0] ?? normalTargets[0] ?? null;
 
   if (target === null) {
     return {

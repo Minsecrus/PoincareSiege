@@ -1,4 +1,12 @@
 import * as THREE from 'three';
+import {
+  OUTERMOST_BUILDABLE_TOWER_RING,
+  isBuildableTowerRing,
+} from '../game/towerRingRules';
+import {
+  createSpecialTileAssignments,
+  type SpecialTileKind,
+} from '../game/specialTiles';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -14,7 +22,7 @@ import {
 } from '../math/hyperbolic';
 import { createRegularTiling, type HyperbolicTile } from '../world/tiling';
 
-const MAX_TILING_RING = 4;
+const MAX_TILING_RING = OUTERMOST_BUILDABLE_TOWER_RING;
 const ROUTE_COUNT = 7;
 const SPAWN_HYPERBOLIC_RADIUS = 4.7;
 
@@ -25,6 +33,14 @@ const RING_STYLE = [
   { fill: 0x081823, emissive: 0x041e26, line: 0x1c5e68, opacity: 0.78 },
   { fill: 0x06131d, emissive: 0x03151d, line: 0x123d4c, opacity: 0.54 },
 ] as const;
+
+const SPECIAL_TILE_STYLE: Readonly<
+  Record<SpecialTileKind, { fill: number; line: number }>
+> = Object.freeze({
+  power: { fill: 0xff7d45, line: 0xffcf86 },
+  haste: { fill: 0x4aa8ff, line: 0xb4e9ff },
+  repair: { fill: 0x57d995, line: 0xc1ffdc },
+});
 
 export interface WarpedMesh {
   geometry: THREE.BufferGeometry;
@@ -50,6 +66,7 @@ export interface BattlefieldVisuals {
   warpedSegments: WarpedSegments[];
   warpedRoutes: WarpedRoute[];
   buildableTiles: HyperbolicTile[];
+  specialTiles: ReadonlyMap<string, SpecialTileKind>;
 }
 
 function createStarField(scene: THREE.Scene): void {
@@ -189,6 +206,139 @@ function createTileRing(
   });
 }
 
+type IconSegment = readonly [number, number, number, number];
+
+const SPECIAL_TILE_ICONS: Readonly<
+  Record<SpecialTileKind, readonly IconSegment[]>
+> = Object.freeze({
+  power: [
+    [-0.12, 0.58, 0.16, 0.08],
+    [0.16, 0.08, -0.02, 0.08],
+    [-0.02, 0.08, 0.12, -0.58],
+  ],
+  haste: [
+    [-0.5, 0.34, -0.1, 0],
+    [-0.1, 0, -0.5, -0.34],
+    [-0.04, 0.34, 0.36, 0],
+    [0.36, 0, -0.04, -0.34],
+  ],
+  repair: [
+    [-0.5, 0, 0.5, 0],
+    [0, -0.5, 0, 0.5],
+  ],
+});
+
+function createInsetTileGeometry(
+  tiles: readonly HyperbolicTile[],
+): THREE.BufferGeometry | null {
+  const geometries = tiles.map((tile) => {
+    const shape = new THREE.Shape();
+    tile.boundary.forEach((point, index) => {
+      const x = tile.center.x + (point.x - tile.center.x) * 0.82;
+      const y = tile.center.y + (point.y - tile.center.y) * 0.82;
+      if (index === 0) {
+        shape.moveTo(x, y);
+      } else {
+        shape.lineTo(x, y);
+      }
+    });
+    shape.closePath();
+    const geometry = new THREE.ShapeGeometry(shape);
+    geometry.rotateX(-Math.PI / 2);
+    return geometry;
+  });
+  const merged = mergeGeometries(geometries, false);
+  geometries.forEach((geometry) => geometry.dispose());
+  return merged;
+}
+
+function createSpecialTileVisuals(
+  scene: THREE.Scene,
+  visuals: BattlefieldVisuals,
+  tiles: readonly HyperbolicTile[],
+): void {
+  const tilesById = new Map(tiles.map((tile) => [tile.id, tile]));
+
+  for (const kind of Object.keys(SPECIAL_TILE_STYLE) as SpecialTileKind[]) {
+    const assignedTiles = [...visuals.specialTiles]
+      .filter(([, assignedKind]) => assignedKind === kind)
+      .map(([tileId]) => tilesById.get(tileId))
+      .filter((tile): tile is HyperbolicTile => tile !== undefined);
+    if (assignedTiles.length === 0) {
+      continue;
+    }
+
+    const style = SPECIAL_TILE_STYLE[kind];
+    const merged = createInsetTileGeometry(assignedTiles);
+    if (merged) {
+      const positions = merged.getAttribute('position');
+      const canonicalPoints = new Float32Array(positions.count * 2);
+      for (let index = 0; index < positions.count; index += 1) {
+        canonicalPoints[index * 2] = positions.getX(index);
+        canonicalPoints[index * 2 + 1] = -positions.getZ(index);
+      }
+
+      const material = new THREE.MeshBasicMaterial({
+        color: style.fill,
+        transparent: true,
+        opacity: 0.13,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      });
+      const mesh = new THREE.Mesh(merged, material);
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 2;
+      scene.add(mesh);
+      visuals.warpedMeshes.push({ geometry: merged, canonicalPoints });
+    }
+
+    const iconPoints: Vec2[] = [];
+    for (const tile of assignedTiles) {
+      const iconRadius =
+        Math.min(
+          ...tile.boundary.map((point) =>
+            Math.hypot(point.x - tile.center.x, point.y - tile.center.y),
+          ),
+        ) * 0.58;
+      for (const [fromX, fromY, toX, toY] of SPECIAL_TILE_ICONS[kind]) {
+        iconPoints.push(
+          {
+            x: tile.center.x + fromX * iconRadius,
+            y: tile.center.y + fromY * iconRadius,
+          },
+          {
+            x: tile.center.x + toX * iconRadius,
+            y: tile.center.y + toY * iconRadius,
+          },
+        );
+      }
+    }
+
+    const iconGeometry = new LineSegmentsGeometry();
+    const iconMaterial = new LineMaterial({
+      color: style.line,
+      linewidth: 1.8,
+      transparent: true,
+      opacity: 0.68,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+    });
+    visuals.lineMaterials.push(iconMaterial);
+    const icon = new LineSegments2(iconGeometry, iconMaterial);
+    icon.frustumCulled = false;
+    icon.renderOrder = 6;
+    scene.add(icon);
+    visuals.warpedSegments.push({
+      geometry: iconGeometry,
+      canonicalPoints: iconPoints,
+      height: 0.038,
+    });
+  }
+}
+
 function createRoutes(
   scene: THREE.Scene,
   visuals: BattlefieldVisuals,
@@ -240,6 +390,8 @@ function createRoutes(
 export function createBattlefieldVisuals(
   scene: THREE.Scene,
   worldRadius: number,
+  availableKinds: readonly SpecialTileKind[] = [],
+  seed = 0,
 ): BattlefieldVisuals {
   const visuals: BattlefieldVisuals = {
     lineMaterials: [],
@@ -247,6 +399,7 @@ export function createBattlefieldVisuals(
     warpedSegments: [],
     warpedRoutes: [],
     buildableTiles: [],
+    specialTiles: new Map(),
   };
   configureLighting(scene);
   createStarField(scene);
@@ -298,7 +451,12 @@ export function createBattlefieldVisuals(
 
   const tiling = createRegularTiling(7, 3, MAX_TILING_RING, 7);
   visuals.buildableTiles.push(
-    ...tiling.tiles.filter((tile) => tile.ring === 1 || tile.ring === 2),
+    ...tiling.tiles.filter((tile) => isBuildableTowerRing(tile.ring)),
+  );
+  visuals.specialTiles = createSpecialTileAssignments(
+    visuals.buildableTiles,
+    availableKinds,
+    seed,
   );
   for (let ring = 0; ring <= MAX_TILING_RING; ring += 1) {
     createTileRing(
@@ -308,6 +466,7 @@ export function createBattlefieldVisuals(
       ring,
     );
   }
+  createSpecialTileVisuals(scene, visuals, tiling.tiles);
   createRoutes(scene, visuals);
   return visuals;
 }

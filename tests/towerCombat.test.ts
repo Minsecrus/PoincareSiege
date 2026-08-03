@@ -117,6 +117,40 @@ describe('tower combat', () => {
     expect(byId.targetIds).toEqual(['alpha']);
   });
 
+  it('support tower deals low damage to every enemy in its H² range', () => {
+    const result = resolveTowerCombat(
+      tower('support', { x: 0, y: 0 }),
+      [
+        enemy('near', pointAt(0.4)),
+        enemy('edge', pointAt(1.45)),
+        enemy('outside', pointAt(1.5)),
+      ],
+    );
+
+    expect(result.targetIds).toEqual(['near', 'edge']);
+    expect(result.effects).toEqual([
+      { enemyId: 'near', damage: 6 },
+      { enemyId: 'edge', damage: 6 },
+    ]);
+  });
+
+  it('bulwark sends a deliberately weak shielding pulse through its taunt range', () => {
+    const result = resolveTowerCombat(
+      tower('bulwark', { x: 0, y: 0 }),
+      [
+        enemy('near', pointAt(0.4)),
+        enemy('edge', pointAt(0.78)),
+        enemy('outside', pointAt(0.82)),
+      ],
+    );
+
+    expect(result.targetIds).toEqual(['near', 'edge']);
+    expect(result.effects).toEqual([
+      { enemyId: 'near', damage: 1 },
+      { enemyId: 'edge', damage: 1 },
+    ]);
+  });
+
   it('does not mutate its input enemy collection or resolve duplicate IDs twice', () => {
     const enemies = [
       enemy('same', pointAt(1.2)),

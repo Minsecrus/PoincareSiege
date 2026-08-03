@@ -15,8 +15,8 @@ import {
   type TowerKind,
 } from '../game/towerEconomy';
 import {
-  SECTOR_TOWER_HEALTH_PER_SEGMENT,
   getTowerHealthSegments,
+  getTowerHealthSegmentsForMaxHealth,
   getTowerStats,
   type TowerAttackMode,
 } from '../game/towerStats';
@@ -29,6 +29,8 @@ import {
   type TowerEnchantmentKind,
   type TowerEnchantmentLevelsInput,
 } from '../game/towerEnchantments';
+import { getTowerDamageType } from '../game/damageResistance';
+import type { SpecialTileKind } from '../game/specialTiles';
 
 interface GameMenuActions {
   buildTower: (kind: TowerKind) => void;
@@ -59,6 +61,14 @@ function requireElement<T extends Element>(selector: string): T {
   return element;
 }
 
+function formatReadoutNumber(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '0';
+  }
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
 const TOWER_NAMES: Record<TowerKind, string> = {
   sector: '扇形守卫',
   prism: '测地棱镜',
@@ -66,6 +76,8 @@ const TOWER_NAMES: Record<TowerKind, string> = {
   anchor: '滞流锚',
   arc: '链式电弧',
   sniper: '湮灭狙击塔',
+  support: '共振信标',
+  bulwark: '壁垒塔',
 };
 
 const ENCHANTMENT_NAMES: Record<TowerEnchantmentKind, string> = {
@@ -111,6 +123,8 @@ export class GameMenus {
     requireElement<HTMLElement>('#tower-health');
   private readonly towerDamage =
     requireElement<HTMLElement>('#tower-damage');
+  private readonly towerDamageIcon =
+    requireElement<SVGSVGElement>('#tower-damage-icon');
   private readonly towerRange =
     requireElement<HTMLElement>('#tower-range');
   private readonly towerAngle =
@@ -149,9 +163,20 @@ export class GameMenus {
     this.baseSkills.addEventListener('click', this.onBaseSkillClick);
   }
 
-  showBuild(resourceAmount: number): void {
+  showBuild(
+    resourceAmount: number,
+    specialTileKind?: SpecialTileKind | null,
+  ): void {
     this.hideAll();
     this.buildElement.hidden = false;
+    this.updateBuild(resourceAmount, specialTileKind);
+  }
+
+  updateBuild(
+    resourceAmount: number,
+    specialTileKind?: SpecialTileKind | null,
+  ): void {
+    this.setSpecialTileIndicator(specialTileKind);
     this.updateBuildOptions(resourceAmount);
   }
 
@@ -162,6 +187,7 @@ export class GameMenus {
     resourceAmount: number,
     enchantments: TowerEnchantmentLevelsInput = {},
     maxHealth?: number,
+    damageMultiplier = 1,
   ): void {
     this.hideAll();
     this.towerElement.hidden = false;
@@ -172,6 +198,7 @@ export class GameMenus {
       resourceAmount,
       enchantments,
       maxHealth,
+      damageMultiplier,
     );
   }
 
@@ -194,6 +221,7 @@ export class GameMenus {
     resourceAmount: number,
     enchantments: TowerEnchantmentLevelsInput = {},
     maxHealth?: number,
+    damageMultiplier = 1,
   ): void {
     const stats = getTowerStats(kind, level);
     const healthSegments = this.getTowerHealthSegments(
@@ -228,8 +256,50 @@ export class GameMenus {
     this.towerHealth.querySelectorAll('i').forEach((pip, index) => {
       pip.classList.toggle('is-active', index < healthSegments.filledSegments);
     });
-    this.towerDamage.textContent = String(stats.damage);
-    this.towerRange.textContent = stats.range.toFixed(1);
+    this.setPrimaryStatIcon(stats.attackMode);
+    if (stats.attackMode === 'support') {
+      delete this.towerDamage.parentElement?.dataset.damageType;
+      const damageBoost = Math.round((stats.auraDamageMultiplier - 1) * 100);
+      this.towerDamage.textContent = `+${damageBoost}%`;
+      this.towerDamage.parentElement?.setAttribute(
+        'aria-label',
+        `邻塔伤害增幅 ${damageBoost}%`,
+      );
+    } else if (stats.attackMode === 'bulwark') {
+      delete this.towerDamage.parentElement?.dataset.damageType;
+      const damageReduction = Math.round(
+        (1 - stats.incomingDamageMultiplier) * 100,
+      );
+      this.towerDamage.textContent = `−${damageReduction}%`;
+      this.towerDamage.parentElement?.setAttribute(
+        'aria-label',
+        `固有伤害减免 ${damageReduction}%`,
+      );
+    } else {
+      const effectiveDamage = stats.damage * damageMultiplier;
+      const damageType = getTowerDamageType(kind);
+      const damageTypeLabel = damageType === 'kinetic' ? '动能' : '能量';
+      const damageReadout = formatReadoutNumber(effectiveDamage);
+      if (this.towerDamage.parentElement) {
+        this.towerDamage.parentElement.dataset.damageType = damageType;
+      }
+      this.towerDamage.textContent = damageReadout;
+      this.towerDamage.parentElement?.setAttribute(
+        'aria-label',
+        damageMultiplier > 1
+          ? `${damageTypeLabel}伤害 ${damageReadout}，总伤害倍率 ${formatReadoutNumber(damageMultiplier)} 倍`
+          : `${damageTypeLabel}伤害 ${damageReadout}`,
+      );
+    }
+    const displayedRange =
+      stats.attackMode === 'bulwark' ? stats.tauntRadius : stats.range;
+    this.towerRange.textContent = displayedRange.toFixed(1);
+    this.towerRange.parentElement?.setAttribute(
+      'aria-label',
+      stats.attackMode === 'bulwark'
+        ? `诱敌范围 ${displayedRange.toFixed(1)}`
+        : `双曲射程 ${stats.range.toFixed(1)}`,
+    );
     const special = this.getAttackReadout(kind, level);
     this.towerAngle.textContent = special.value;
     this.setAttackIcon(stats.attackMode);
@@ -466,15 +536,7 @@ export class GameMenus {
       return getTowerHealthSegments(kind, level, health);
     }
 
-    const clampedHealth = Number.isFinite(health)
-      ? Math.min(maxHealth, Math.max(0, health))
-      : 0;
-    return {
-      totalSegments: Math.ceil(maxHealth / SECTOR_TOWER_HEALTH_PER_SEGMENT),
-      filledSegments: Math.ceil(
-        clampedHealth / SECTOR_TOWER_HEALTH_PER_SEGMENT,
-      ),
-    };
+    return getTowerHealthSegmentsForMaxHealth(kind, maxHealth, health);
   }
 
   private getAttackReadout(
@@ -501,7 +563,38 @@ export class GameMenus {
         return { value: `×${stats.chainCount}`, label: `链式跳跃 ${stats.chainCount}` };
       case 'single-target':
         return { value: '1×', label: '单体锁定' };
+      case 'support':
+        return {
+          value: `+${stats.allyHealPerSecond}/s`,
+          label: `每秒修复邻塔 ${stats.allyHealPerSecond}`,
+        };
+      case 'bulwark':
+        return {
+          value: '↯',
+          label: '进入范围的敌人优先锁定壁垒',
+        };
     }
+  }
+
+  private setSpecialTileIndicator(
+    specialTileKind?: SpecialTileKind | null,
+  ): void {
+    if (specialTileKind) {
+      this.buildElement.dataset.specialTile = specialTileKind;
+    } else {
+      delete this.buildElement.dataset.specialTile;
+    }
+    const labels: Record<SpecialTileKind, string> = {
+      power: '增幅格',
+      haste: '急速格',
+      repair: '修复格',
+    };
+    this.buildElement.setAttribute(
+      'aria-label',
+      specialTileKind
+        ? `选择防御塔，当前为${labels[specialTileKind]}`
+        : '选择防御塔',
+    );
   }
 
   private setAttackIcon(attackMode: TowerAttackMode): void {
@@ -530,10 +623,38 @@ export class GameMenus {
         'M24 4a20 20 0 1 1 0 40 20 20 0 0 1 0-40Zm0 5a15 15 0 1 0 0 30 15 15 0 0 0 0-30Zm0 7a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z',
         'M22 0h4v10h-4zM22 38h4v10h-4zM0 22h10v4H0zM38 22h10v4H38z',
       ],
+      support: [
+        'M24 5 37 13v15l-13 8-13-8V13l13-8Zm0 7-7 4v9l7 4 7-4v-9l-7-4Z',
+        'M21 17h6v5h5v6h-5v5h-6v-5h-5v-6h5v-5Z',
+      ],
+      bulwark: [
+        'm24 3 16 7v12c0 11-6.7 18-16 23C14.7 40 8 33 8 22V10l16-7Zm0 8-9 4v7c0 6.8 3.6 12 9 15.6 5.4-3.6 9-8.8 9-15.6v-7l-9-4Z',
+        'M4 20h8v8H4zM36 20h8v8h-8zM19 21h10v6H19z',
+      ],
     };
     this.towerSpecialIcon.replaceChildren(
       ...paths[attackMode].map((pathData) => {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', pathData);
+        return path;
+      }),
+    );
+  }
+
+  private setPrimaryStatIcon(attackMode: TowerAttackMode): void {
+    const paths =
+      attackMode === 'bulwark'
+        ? [
+            'm24 3 16 7v12c0 11-6.7 18-16 23C14.7 40 8 33 8 22V10l16-7Zm0 8-9 4v7c0 6.8 3.6 12 9 15.6 5.4-3.6 9-8.8 9-15.6v-7l-9-4Z',
+            'M21 16h6v16h-6zM16 21h16v6H16z',
+          ]
+        : ['m24 3 5 13 14 3-10 10 2 16-11-7-11 7 2-16L5 19l14-3 5-13Z'];
+    this.towerDamageIcon.replaceChildren(
+      ...paths.map((pathData) => {
+        const path = document.createElementNS(
+          'http://www.w3.org/2000/svg',
+          'path',
+        );
         path.setAttribute('d', pathData);
         return path;
       }),

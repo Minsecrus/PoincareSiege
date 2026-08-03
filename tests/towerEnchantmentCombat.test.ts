@@ -4,6 +4,7 @@ import {
   applyTowerAllyHeal,
   applyTowerSelfRepair,
   getTowerAttackIntervalMultiplier,
+  getTowerAssaultDamage,
   getTowerEnchantedMaxHealth,
   getFortifiedTowerDamage,
   getTowerIncomingDamageMultiplier,
@@ -97,6 +98,18 @@ describe('tower enchantment combat rules', () => {
     expect(getFortifiedTowerDamage(80, NO_ENCHANTMENTS)).toBe(80);
     expect(getFortifiedTowerDamage(80, fortify)).toBeCloseTo(56);
     expect(getFortifiedTowerDamage(-20, fortify)).toBe(0);
+  });
+
+  it('stacks a bulwark shell before optional fortify while ordinary towers keep normal damage', () => {
+    const fortify = levels({ fortify: 5 });
+
+    expect(getTowerAssaultDamage('sector', 1, 80, NO_ENCHANTMENTS)).toBe(80);
+    expect(
+      getTowerAssaultDamage('bulwark', 1, 80, NO_ENCHANTMENTS),
+    ).toBeCloseTo(46.4);
+    expect(getTowerAssaultDamage('bulwark', 3, 80, fortify)).toBeCloseTo(
+      21.28,
+    );
   });
 
   it('heals the most damaged other tower in strict H² range', () => {

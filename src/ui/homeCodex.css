@@ -172,7 +172,10 @@
   letter-spacing: 0.04em;
 }
 
-.home-codex__stats { gap: 9px; }
+.home-codex__stats {
+  flex-wrap: wrap;
+  gap: 7px 9px;
+}
 
 .home-codex__stat {
   gap: 3px;
@@ -182,6 +185,24 @@
 
 .home-codex__stat svg { width: 13px; height: 13px; fill: currentColor; }
 .home-codex__stat b { font-weight: 800; }
+
+.home-codex__rank {
+  display: flex;
+  gap: 4px;
+  margin-top: 11px;
+}
+
+.home-codex__rank i {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--codex-accent) 78%, transparent);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--codex-accent) 30%, transparent);
+}
+
+.home-codex__entry--terrain {
+  min-height: 150px;
+}
 
 .home-codex__entry.is-locked {
   --codex-accent: #719892;

@@ -2,6 +2,7 @@ import {
   applyTowerAllyHeal,
   applyTowerSelfRepair,
   resolveAllyHealTarget,
+  restoreTowerHealth,
   type AllyHealTower,
 } from './towerEnchantmentCombat';
 import type { TowerEnchantmentLevels } from './towerEnchantments';
@@ -9,6 +10,8 @@ import type { TowerEnchantmentLevels } from './towerEnchantments';
 /** Mutable tower data needed by the continuous enchantment maintenance pass. */
 export interface TowerMaintenanceTower extends AllyHealTower {
   readonly enchantments: TowerEnchantmentLevels;
+  /** Continuous healing supplied by terrain and non-stacking support auras. */
+  readonly externalHealingPerSecond?: number;
 }
 
 /** One health value produced by the view-independent maintenance simulation. */
@@ -53,6 +56,12 @@ export function resolveTowerMaintenance(
       tower.health,
       tower.maxHealth,
       tower.enchantments,
+      deltaSeconds,
+    );
+    tower.health = restoreTowerHealth(
+      tower.health,
+      tower.maxHealth,
+      tower.externalHealingPerSecond ?? 0,
       deltaSeconds,
     );
   }

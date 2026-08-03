@@ -11,7 +11,9 @@ export type TowerVisualKind =
   | 'pulse'
   | 'anchor'
   | 'arc'
-  | 'sniper';
+  | 'sniper'
+  | 'support'
+  | 'bulwark';
 
 export interface TowerMaterials {
   armor: THREE.MeshStandardMaterial;
@@ -459,6 +461,164 @@ function createSniperVisual(materials: TowerMaterials): TowerVisual {
   return { group, head, core, levelIndicators };
 }
 
+/**
+ * A pale resonance beacon whose open silhouette reads as support equipment:
+ * four raised arms hold two field rings around a tall, exposed crystal.  It
+ * deliberately avoids the heavy dark gun body used by offensive towers.
+ */
+function createSupportVisual(materials: TowerMaterials): TowerVisual {
+  const group = new THREE.Group();
+  addFoundation(group, materials);
+  addMesh(
+    group,
+    new THREE.CylinderGeometry(0.235, 0.29, 0.16, 8),
+    materials.armor,
+    [0, 0.19, 0],
+  );
+  addMesh(
+    group,
+    new THREE.CylinderGeometry(0.16, 0.205, 0.12, 8),
+    materials.energy,
+    [0, 0.31, 0],
+  );
+  const levelIndicators = addLevelIndicators(group, materials, [0, 0.245, 0.255]);
+
+  const head = new THREE.Group();
+  head.position.y = 0.35;
+  group.add(head);
+
+  // The braces point inward and leave the central crystal fully visible.
+  for (let index = 0; index < 4; index += 1) {
+    const angle = Math.PI / 4 + (index * Math.PI) / 2;
+    const arm = addMesh(
+      head,
+      new THREE.BoxGeometry(0.065, 0.24, 0.31),
+      materials.armor,
+      [Math.cos(angle) * 0.205, 0.13, Math.sin(angle) * 0.205],
+    );
+    arm.rotation.y = -angle;
+    arm.rotation.z = Math.sin(angle) * 0.12;
+    addMesh(
+      head,
+      new THREE.OctahedronGeometry(0.055, 0),
+      materials.energy,
+      [Math.cos(angle) * 0.25, 0.28, Math.sin(angle) * 0.25],
+    );
+  }
+
+  for (const [radius, height] of [
+    [0.27, 0.24],
+    [0.205, 0.43],
+  ] as const) {
+    const ring = addMesh(
+      head,
+      new THREE.TorusGeometry(radius, 0.018, 6, 32),
+      materials.energy,
+      [0, height, 0],
+    );
+    ring.rotation.x = Math.PI / 2;
+  }
+
+  const core = addMesh(
+    head,
+    new THREE.OctahedronGeometry(0.14, 1),
+    materials.energy,
+    [0, 0.34, 0],
+  );
+  core.geometry.scale(0.72, 1.7, 0.72);
+  core.rotation.y = Math.PI / 4;
+
+  addMesh(
+    head,
+    new THREE.CylinderGeometry(0.055, 0.08, 0.2, 8),
+    materials.armor,
+    [0, 0.1, 0],
+  );
+  return { group, head, core, levelIndicators };
+}
+
+/**
+ * A broad, non-directional defensive bastion.  Six pale armour panels form a
+ * compact hexagonal wall around an exposed cyan shield core, so it reads as a
+ * place to hold rather than another gun barrel.
+ */
+function createBulwarkVisual(materials: TowerMaterials): TowerVisual {
+  const group = new THREE.Group();
+
+  const plinth = addMesh(
+    group,
+    new THREE.CylinderGeometry(0.39, 0.46, 0.14, 6),
+    materials.armor,
+    [0, 0.07, 0],
+  );
+  plinth.receiveShadow = true;
+  addMesh(
+    group,
+    new THREE.CylinderGeometry(0.31, 0.36, 0.045, 6),
+    materials.energy,
+    [0, 0.15, 0],
+  );
+  const levelIndicators = addLevelIndicators(group, materials, [0, 0.205, 0.35]);
+
+  const head = new THREE.Group();
+  head.position.y = 0.2;
+  group.add(head);
+
+  const innerCitadel = addMesh(
+    head,
+    new THREE.CylinderGeometry(0.235, 0.29, 0.25, 6),
+    materials.armor,
+    [0, 0.125, 0],
+  );
+  innerCitadel.rotation.y = Math.PI / 6;
+
+  for (let index = 0; index < 6; index += 1) {
+    const angle = Math.PI / 6 + (index * Math.PI * 2) / 6;
+    const radius = 0.33;
+    const panel = addMesh(
+      head,
+      new THREE.BoxGeometry(0.2, 0.225, 0.07),
+      materials.armor,
+      [Math.cos(angle) * radius, 0.16, Math.sin(angle) * radius],
+    );
+    panel.rotation.y = -angle;
+    panel.rotation.z = Math.sin(angle) * 0.07;
+
+    const shieldStrip = addMesh(
+      head,
+      new THREE.BoxGeometry(0.125, 0.028, 0.025),
+      materials.energy,
+      [Math.cos(angle) * 0.37, 0.195, Math.sin(angle) * 0.37],
+    );
+    shieldStrip.rotation.y = -angle;
+  }
+
+  const lowerRing = addMesh(
+    head,
+    new THREE.TorusGeometry(0.27, 0.014, 6, 24),
+    materials.energy,
+    [0, 0.13, 0],
+  );
+  lowerRing.rotation.x = Math.PI / 2;
+  const upperRing = addMesh(
+    head,
+    new THREE.TorusGeometry(0.17, 0.018, 6, 24),
+    materials.energy,
+    [0, 0.36, 0],
+  );
+  upperRing.rotation.x = Math.PI / 2;
+
+  const core = addMesh(
+    head,
+    new THREE.OctahedronGeometry(0.13, 1),
+    materials.energy,
+    [0, 0.29, 0],
+  );
+  core.geometry.scale(0.86, 1.28, 0.86);
+  core.rotation.y = Math.PI / 4;
+  return { group, head, core, levelIndicators };
+}
+
 /** Creates the intentionally distinct visual silhouette for a tower kind. */
 export function createTowerVisual(
   kind: TowerVisualKind,
@@ -475,6 +635,10 @@ export function createTowerVisual(
       return createArcVisual(materials);
     case 'sniper':
       return createSniperVisual(materials);
+    case 'support':
+      return createSupportVisual(materials);
+    case 'bulwark':
+      return createBulwarkVisual(materials);
     case 'sector':
       return createSectorVisual(materials);
   }

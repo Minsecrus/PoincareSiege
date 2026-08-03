@@ -3,6 +3,7 @@ import {
   getTowerAttackImpactDelays,
   getPrecisionProjectileTiming,
   resolveTowerAttackEffectRange,
+  TOWER_ATTACK_EFFECT_TIMING,
 } from '../src/game/towerAttackTiming';
 import { hyperbolicRadiusToPoincare, type Vec2 } from '../src/math/hyperbolic';
 
@@ -54,6 +55,38 @@ describe('tower attack contact timing', () => {
     expect(pulseDelays[1]).toBeLessThan(pulseDelays[2]);
     expect(arcDelays[0]).toBeLessThan(arcDelays[1]);
     expect(arcDelays[1]).toBeLessThan(arcDelays[2]);
+  });
+
+  it('schedules support damage when the cyan wavefront reaches each enemy', () => {
+    const targets = [pointAt(0.3), pointAt(1.2), pointAt(1.8)];
+    const delays = getTowerAttackImpactDelays({
+      kind: 'support',
+      origin: ORIGIN,
+      targets,
+      range: 1.8,
+    });
+
+    expect(delays[0]).toBeLessThan(delays[1]);
+    expect(delays[1]).toBeLessThan(delays[2]);
+    expect(delays[2]).toBeCloseTo(0.648, 9);
+  });
+
+  it('schedules the bulwark shock ring at its visible shield front', () => {
+    const targets = [pointAt(0.2), pointAt(0.6), pointAt(1)];
+    const delays = getTowerAttackImpactDelays({
+      kind: 'bulwark',
+      origin: ORIGIN,
+      targets,
+      range: 1,
+    });
+
+    expect(delays[0]).toBeLessThan(delays[1]);
+    expect(delays[1]).toBeLessThan(delays[2]);
+    expect(delays[2]).toBeCloseTo(
+      TOWER_ATTACK_EFFECT_TIMING.bulwark.durationSeconds *
+        TOWER_ATTACK_EFFECT_TIMING.bulwark.wavefrontEndProgress,
+      9,
+    );
   });
 
   it('uses beam propagation and anchor-field expansion contact times', () => {

@@ -457,6 +457,47 @@ function resolveSniper(
     : createResolution([], () => 0);
 }
 
+function resolveSupport(
+  tower: CombatTower,
+  enemies: readonly CombatEnemy[],
+): TowerCombatResolution {
+  const stats = getTowerStats(tower.kind, tower.level);
+  if (stats.attackMode !== 'support') {
+    return createResolution([], () => 0);
+  }
+
+  const targets = sortByDistance(
+    tower.position,
+    enemies.filter((enemy) =>
+      isWithinHyperbolicRange(tower.position, enemy.position, stats.range),
+    ),
+  );
+  return createResolution(targets, () => stats.damage);
+}
+
+/**
+ * The bulwark's pulse is deliberately weak: it exists to make attack-speed
+ * and knockback enchantments meaningful while its taunt and mitigation stay
+ * the tower's defining contribution.
+ */
+function resolveBulwark(
+  tower: CombatTower,
+  enemies: readonly CombatEnemy[],
+): TowerCombatResolution {
+  const stats = getTowerStats(tower.kind, tower.level);
+  if (stats.attackMode !== 'bulwark') {
+    return createResolution([], () => 0);
+  }
+
+  const targets = sortByDistance(
+    tower.position,
+    enemies.filter((enemy) =>
+      isWithinHyperbolicRange(tower.position, enemy.position, stats.range),
+    ),
+  );
+  return createResolution(targets, () => stats.damage);
+}
+
 /**
  * Resolves one attack without mutating tower or enemy state.
  *
@@ -486,5 +527,9 @@ export function resolveTowerCombat(
       return resolveArc(tower, validEnemies);
     case 'sniper':
       return resolveSniper(tower, validEnemies);
+    case 'support':
+      return resolveSupport(tower, validEnemies);
+    case 'bulwark':
+      return resolveBulwark(tower, validEnemies);
   }
 }

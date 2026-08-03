@@ -26,6 +26,7 @@ import {
 const EFFECT_HEIGHT = 0.46;
 const EFFECT_RENDER_ORDER = 18;
 const MAX_EFFECT_TARGETS = 6;
+const MAX_SUPPORT_TARGETS = 10;
 const DISK_MARGIN = 1 - 1e-6;
 
 /**
@@ -40,6 +41,8 @@ export interface TowerAttackEffectRequest {
   kind: TowerKind;
   origin: Vec2;
   targets: readonly Vec2[];
+  /** Friendly towers reached by a support pulse; rendered independently. */
+  supportTargets?: readonly Vec2[];
   range?: number;
   /**
    * Precision attacks always resolve against one target. The base reuses the
@@ -711,6 +714,480 @@ function createPulseEffect(
         impact.ringMaterial.dispose();
         impact.shockGeometry.dispose();
         impact.shockMaterial.dispose();
+        impact.flash.geometry.dispose();
+        impact.flash.material.dispose();
+      }
+    },
+  };
+  return effect;
+}
+
+/**
+ * A restrained cyan-and-gold resonance wave.  The leading cyan ring is the
+ * authoritative damage wavefront; its easing is mirrored by
+ * `supportImpactDelay`, so enemy damage can still be scheduled at visible
+ * contact.  Friendly targets receive a separate cyan sigil instead of an
+ * enemy impact burst.
+ */
+function createSupportEffect(
+  origin: Vec2,
+  targets: readonly Vec2[],
+  supportTargets: readonly Vec2[],
+  requestedRange: number | undefined,
+  worldRadius: number,
+): ActiveAttackEffect {
+  const timing = TOWER_ATTACK_EFFECT_TIMING.support;
+  const duration = timing.durationSeconds;
+  const allTargets = [...targets, ...supportTargets];
+  const range = resolveTowerAttackEffectRange(
+    origin,
+    allTargets,
+    requestedRange,
+    timing.rangeFallback,
+  );
+  const enemyImpactDelays = getTowerAttackImpactDelays({
+    kind: 'support',
+    origin,
+    targets,
+    range,
+  });
+  const friendlyImpactDelays = getTowerAttackImpactDelays({
+    kind: 'support',
+    origin,
+    targets: supportTargets,
+    range,
+  });
+  const group = createEffectGroup('tower-support-resonance-pulse');
+
+  const waves = [
+    {
+      color: 0x63e5dc,
+      delayProgress: 0,
+      travelProgress: timing.wavefrontEndProgress,
+      rangeScale: 1,
+      opacity: 0.34,
+      height: 0.038,
+    },
+    {
+      color: 0xf1c96f,
+      delayProgress: 0.075,
+      travelProgress: 0.76,
+      rangeScale: 0.94,
+      opacity: 0.24,
+      height: 0.022,
+    },
+  ].map((definition) => {
+    const geometry = new THREE.BufferGeometry();
+    const material = createLineMaterial(definition.color);
+    const ring = new THREE.LineLoop(geometry, material);
+    ring.renderOrder = EFFECT_RENDER_ORDER + 1;
+    group.add(ring);
+    return { ...definition, geometry, material };
+  });
+
+  const sourceFlash = createFlash(0xa5fff1);
+  group.add(sourceFlash.mesh);
+
+  const enemyImpacts = targets.map((target, index) => {
+    const ringGeometry = new THREE.BufferGeometry();
+    const ringMaterial = createLineMaterial(0xf5ce75);
+    const ring = new THREE.LineLoop(ringGeometry, ringMaterial);
+    ring.renderOrder = EFFECT_RENDER_ORDER + 2;
+    const sparkGeometry = new THREE.BufferGeometry();
+    const sparkMaterial = createLineMaterial(0xffe5a6);
+    const sparks = new THREE.LineSegments(sparkGeometry, sparkMaterial);
+    sparks.renderOrder = EFFECT_RENDER_ORDER + 3;
+    const flash = createFlash(0xf7d98e);
+    group.add(ring, sparks, flash.mesh);
+    return {
+      target,
+      index,
+      arrivalSeconds: enemyImpactDelays[index] ?? 0,
+      ringGeometry,
+      ringMaterial,
+      sparkGeometry,
+      sparkMaterial,
+      flash,
+    };
+  });
+
+  const friendlyImpacts = supportTargets.map((target, index) => {
+    const ringGeometry = new THREE.BufferGeometry();
+    const ringMaterial = createLineMaterial(0x80f5e5);
+    const ring = new THREE.LineLoop(ringGeometry, ringMaterial);
+    ring.renderOrder = EFFECT_RENDER_ORDER + 2;
+    const sigilGeometry = new THREE.BufferGeometry();
+    const sigilMaterial = createLineMaterial(0xc5fff2);
+    const sigil = new THREE.LineSegments(sigilGeometry, sigilMaterial);
+    sigil.renderOrder = EFFECT_RENDER_ORDER + 3;
+    const flash = createFlash(0x8ff8e7);
+    group.add(ring, sigil, flash.mesh);
+    return {
+      target,
+      index,
+      arrivalSeconds: friendlyImpactDelays[index] ?? 0,
+      ringGeometry,
+      ringMaterial,
+      sigilGeometry,
+      sigilMaterial,
+      flash,
+    };
+  });
+
+  const effect: ActiveAttackEffect = {
+    group,
+    duration,
+    age: 0,
+    update(viewTransform): void {
+      const progress = effect.age / duration;
+      const globalFade = 1 - smoothStep(0.74, 1, progress);
+
+      for (const wave of waves) {
+        const travel = clamp(
+          (progress - wave.delayProgress) / wave.travelProgress,
+          0,
+          1,
+        );
+        const wavefront = easeOutCubic(travel);
+        writeCanonicalPath(
+          wave.geometry,
+          circleAtHyperbolicRadius(
+            origin,
+            Math.max(0.012, range * wave.rangeScale * wavefront),
+            64,
+          ),
+          viewTransform,
+          worldRadius,
+          EFFECT_HEIGHT + wave.height,
+        );
+        wave.material.opacity =
+          wave.opacity *
+          smoothStep(0, 0.045, travel) *
+          globalFade;
+      }
+
+      const sourceIntensity = 1 - smoothStep(0.12, 0.42, progress);
+      updateFlash(
+        sourceFlash,
+        origin,
+        viewTransform,
+        worldRadius,
+        0.24 * sourceIntensity,
+        0.1 + 0.16 * easeOutCubic(progress * 3),
+      );
+
+      for (const impact of enemyImpacts) {
+        const hitProgress = clamp(
+          (effect.age - impact.arrivalSeconds) / (duration * 0.24),
+          0,
+          1,
+        );
+        const hitOpacity =
+          smoothStep(0, 0.07, hitProgress) *
+          (1 - smoothStep(0.4, 1, hitProgress)) *
+          globalFade;
+        writeCanonicalPath(
+          impact.ringGeometry,
+          circleAtHyperbolicRadius(
+            impact.target,
+            0.035 + 0.12 * easeOutCubic(hitProgress),
+            18,
+          ),
+          viewTransform,
+          worldRadius,
+          EFFECT_HEIGHT + 0.055,
+        );
+        writeCanonicalPath(
+          impact.sparkGeometry,
+          radialSigilSegments(
+            impact.target,
+            0.03,
+            0.11 + 0.1 * hitProgress,
+            6,
+            impact.index * 0.5 + progress * Math.PI * 3,
+          ),
+          viewTransform,
+          worldRadius,
+          EFFECT_HEIGHT + 0.07,
+        );
+        impact.ringMaterial.opacity = 0.52 * hitOpacity;
+        impact.sparkMaterial.opacity = 0.38 * hitOpacity;
+        updateFlash(
+          impact.flash,
+          impact.target,
+          viewTransform,
+          worldRadius,
+          0.3 * hitOpacity,
+          0.055 + 0.085 * easeOutCubic(hitProgress),
+        );
+      }
+
+      for (const impact of friendlyImpacts) {
+        const hitProgress = clamp(
+          (effect.age - impact.arrivalSeconds) / (duration * 0.34),
+          0,
+          1,
+        );
+        const hitOpacity =
+          smoothStep(0, 0.08, hitProgress) *
+          (1 - smoothStep(0.5, 1, hitProgress)) *
+          globalFade;
+        writeCanonicalPath(
+          impact.ringGeometry,
+          circleAtHyperbolicRadius(
+            impact.target,
+            0.04 + 0.16 * easeOutCubic(hitProgress),
+            22,
+          ),
+          viewTransform,
+          worldRadius,
+          EFFECT_HEIGHT + 0.062,
+        );
+        // Four orthogonal arms read as a support/repair marker, while the
+        // enemy feedback above remains a six-point gold impact.
+        writeCanonicalPath(
+          impact.sigilGeometry,
+          radialSigilSegments(
+            impact.target,
+            0.025,
+            0.15 + 0.06 * easeOutCubic(hitProgress),
+            4,
+            Math.PI / 4 + impact.index * 0.12,
+          ),
+          viewTransform,
+          worldRadius,
+          EFFECT_HEIGHT + 0.078,
+        );
+        impact.ringMaterial.opacity = 0.5 * hitOpacity;
+        impact.sigilMaterial.opacity = 0.46 * hitOpacity;
+        updateFlash(
+          impact.flash,
+          impact.target,
+          viewTransform,
+          worldRadius,
+          0.28 * hitOpacity,
+          0.06 + 0.1 * easeOutCubic(hitProgress),
+        );
+      }
+    },
+    dispose(): void {
+      for (const wave of waves) {
+        wave.geometry.dispose();
+        wave.material.dispose();
+      }
+      sourceFlash.geometry.dispose();
+      sourceFlash.material.dispose();
+      for (const impact of enemyImpacts) {
+        impact.ringGeometry.dispose();
+        impact.ringMaterial.dispose();
+        impact.sparkGeometry.dispose();
+        impact.sparkMaterial.dispose();
+        impact.flash.geometry.dispose();
+        impact.flash.material.dispose();
+      }
+      for (const impact of friendlyImpacts) {
+        impact.ringGeometry.dispose();
+        impact.ringMaterial.dispose();
+        impact.sigilGeometry.dispose();
+        impact.sigilMaterial.dispose();
+        impact.flash.geometry.dispose();
+        impact.flash.material.dispose();
+      }
+    },
+  };
+  return effect;
+}
+
+/**
+ * A deliberately quiet defensive pulse.  The leading cyan hex-ring is the
+ * gameplay wavefront and its `easeOutCubic` travel is mirrored exactly by
+ * `bulwarkImpactDelay`; the secondary blue ring is presentation only.
+ */
+function createBulwarkEffect(
+  origin: Vec2,
+  targets: readonly Vec2[],
+  requestedRange: number | undefined,
+  worldRadius: number,
+): ActiveAttackEffect {
+  const timing = TOWER_ATTACK_EFFECT_TIMING.bulwark;
+  const duration = timing.durationSeconds;
+  const range = resolveTowerAttackEffectRange(
+    origin,
+    targets,
+    requestedRange,
+    timing.rangeFallback,
+  );
+  const impactDelays = getTowerAttackImpactDelays({
+    kind: 'bulwark',
+    origin,
+    targets,
+    range,
+  });
+  const group = createEffectGroup('tower-bulwark-shield-pulse');
+
+  const leadingGeometry = new THREE.BufferGeometry();
+  const leadingMaterial = createLineMaterial(0x72e9f5);
+  const leadingRing = new THREE.LineLoop(leadingGeometry, leadingMaterial);
+  leadingRing.renderOrder = EFFECT_RENDER_ORDER + 1;
+  const echoGeometry = new THREE.BufferGeometry();
+  const echoMaterial = createLineMaterial(0x4a9ed9);
+  const echoRing = new THREE.LineLoop(echoGeometry, echoMaterial);
+  echoRing.renderOrder = EFFECT_RENDER_ORDER;
+  const sourceGeometry = new THREE.BufferGeometry();
+  const sourceMaterial = createLineMaterial(0xb8fff7);
+  const sourceRing = new THREE.LineLoop(sourceGeometry, sourceMaterial);
+  sourceRing.renderOrder = EFFECT_RENDER_ORDER + 2;
+  const sourceFlash = createFlash(0x93eee8);
+  group.add(leadingRing, echoRing, sourceRing, sourceFlash.mesh);
+
+  const impacts = targets.slice(0, MAX_EFFECT_TARGETS).map((target, index) => {
+    const ringGeometry = new THREE.BufferGeometry();
+    const ringMaterial = createLineMaterial(0xa8f9ff);
+    const ring = new THREE.LineLoop(ringGeometry, ringMaterial);
+    ring.renderOrder = EFFECT_RENDER_ORDER + 2;
+    const shardGeometry = new THREE.BufferGeometry();
+    const shardMaterial = createLineMaterial(0x71c8f0);
+    const shards = new THREE.LineSegments(shardGeometry, shardMaterial);
+    shards.renderOrder = EFFECT_RENDER_ORDER + 3;
+    const flash = createFlash(0xa4f5ff);
+    group.add(ring, shards, flash.mesh);
+    return {
+      target,
+      index,
+      arrivalSeconds: impactDelays[index] ?? 0,
+      ringGeometry,
+      ringMaterial,
+      shardGeometry,
+      shardMaterial,
+      flash,
+    };
+  });
+
+  const effect: ActiveAttackEffect = {
+    group,
+    duration,
+    age: 0,
+    update(viewTransform): void {
+      const progress = effect.age / duration;
+      const globalFade = 1 - smoothStep(0.74, 1, progress);
+      const leadingTravel = clamp(progress / timing.wavefrontEndProgress, 0, 1);
+      const leadingWavefront = easeOutCubic(leadingTravel);
+      writeCanonicalPath(
+        leadingGeometry,
+        circleAtHyperbolicRadius(
+          origin,
+          Math.max(0.012, range * leadingWavefront),
+          6,
+        ),
+        viewTransform,
+        worldRadius,
+        EFFECT_HEIGHT + 0.034,
+      );
+      leadingMaterial.opacity =
+        0.28 * smoothStep(0, 0.05, leadingTravel) * globalFade;
+
+      const echoDelay = 0.09;
+      const echoTravel = clamp(
+        (progress - echoDelay) / (timing.wavefrontEndProgress + 0.06),
+        0,
+        1,
+      );
+      writeCanonicalPath(
+        echoGeometry,
+        circleAtHyperbolicRadius(
+          origin,
+          Math.max(0.012, range * 0.94 * easeOutCubic(echoTravel)),
+          18,
+        ),
+        viewTransform,
+        worldRadius,
+        EFFECT_HEIGHT + 0.018,
+      );
+      echoMaterial.opacity =
+        0.16 * smoothStep(0, 0.06, echoTravel) * globalFade;
+
+      const sourceProgress = 1 - smoothStep(0.12, 0.43, progress);
+      writeCanonicalPath(
+        sourceGeometry,
+        circleAtHyperbolicRadius(
+          origin,
+          0.085 + 0.075 * easeOutCubic(progress * 3.2),
+          6,
+        ),
+        viewTransform,
+        worldRadius,
+        EFFECT_HEIGHT + 0.052,
+      );
+      sourceMaterial.opacity = 0.24 * sourceProgress;
+      updateFlash(
+        sourceFlash,
+        origin,
+        viewTransform,
+        worldRadius,
+        0.13 * sourceProgress,
+        0.09 + 0.1 * easeOutCubic(progress * 3),
+      );
+
+      for (const impact of impacts) {
+        const hitProgress = clamp(
+          (effect.age - impact.arrivalSeconds) / (duration * 0.25),
+          0,
+          1,
+        );
+        const hitOpacity =
+          smoothStep(0, 0.08, hitProgress) *
+          (1 - smoothStep(0.45, 1, hitProgress)) *
+          globalFade;
+        writeCanonicalPath(
+          impact.ringGeometry,
+          circleAtHyperbolicRadius(
+            impact.target,
+            0.04 + 0.115 * easeOutCubic(hitProgress),
+            6,
+          ),
+          viewTransform,
+          worldRadius,
+          EFFECT_HEIGHT + 0.06,
+        );
+        writeCanonicalPath(
+          impact.shardGeometry,
+          radialSigilSegments(
+            impact.target,
+            0.026,
+            0.105 + 0.075 * easeOutCubic(hitProgress),
+            6,
+            impact.index * 0.36 + progress * Math.PI * 1.5,
+          ),
+          viewTransform,
+          worldRadius,
+          EFFECT_HEIGHT + 0.072,
+        );
+        impact.ringMaterial.opacity = 0.31 * hitOpacity;
+        impact.shardMaterial.opacity = 0.21 * hitOpacity;
+        updateFlash(
+          impact.flash,
+          impact.target,
+          viewTransform,
+          worldRadius,
+          0.16 * hitOpacity,
+          0.05 + 0.07 * easeOutCubic(hitProgress),
+        );
+      }
+    },
+    dispose(): void {
+      leadingGeometry.dispose();
+      leadingMaterial.dispose();
+      echoGeometry.dispose();
+      echoMaterial.dispose();
+      sourceGeometry.dispose();
+      sourceMaterial.dispose();
+      sourceFlash.geometry.dispose();
+      sourceFlash.material.dispose();
+      for (const impact of impacts) {
+        impact.ringGeometry.dispose();
+        impact.ringMaterial.dispose();
+        impact.shardGeometry.dispose();
+        impact.shardMaterial.dispose();
         impact.flash.geometry.dispose();
         impact.flash.material.dispose();
       }
@@ -1520,7 +1997,15 @@ export class TowerAttackEffects {
       .filter(isUsablePoint)
       .slice(0, MAX_EFFECT_TARGETS)
       .map(normalizePoint);
-    if (targets.length === 0) {
+    const supportTargets = (request.supportTargets ?? [])
+      .filter(isUsablePoint)
+      .slice(0, MAX_SUPPORT_TARGETS)
+      .map(normalizePoint);
+    if (
+      request.kind !== 'support' &&
+      request.kind !== 'bulwark' &&
+      targets.length === 0
+    ) {
       return;
     }
 
@@ -1550,6 +2035,23 @@ export class TowerAttackEffects {
         break;
       case 'arc':
         effect = createArcEffect(origin, targets, this.worldRadius);
+        break;
+      case 'support':
+        effect = createSupportEffect(
+          origin,
+          targets,
+          supportTargets,
+          request.range,
+          this.worldRadius,
+        );
+        break;
+      case 'bulwark':
+        effect = createBulwarkEffect(
+          origin,
+          targets,
+          request.range,
+          this.worldRadius,
+        );
         break;
       case 'sniper':
         effect = createPrecisionProjectileEffect(

@@ -12,7 +12,9 @@ export type TowerAttackMode =
   | 'pulse'
   | 'slow-field'
   | 'chain-arc'
-  | 'single-target';
+  | 'single-target'
+  | 'support'
+  | 'bulwark';
 
 /** Values shared by every tower family. `range` is always an H² distance. */
 export interface TowerStatsBase<
@@ -77,6 +79,28 @@ export interface ArcTowerStats extends TowerStatsBase<'arc', 'chain-arc'> {
 export interface SniperTowerStats
   extends TowerStatsBase<'sniper', 'single-target'> {}
 
+/** A low-damage area weapon that strengthens and repairs nearby allies. */
+export interface SupportTowerStats
+  extends TowerStatsBase<'support', 'support'> {
+  /** Strongest-only damage multiplier granted to allied towers in H² range. */
+  auraDamageMultiplier: number;
+  /** Strongest-only healing rate granted to allied towers in H² range. */
+  allyHealPerSecond: number;
+}
+
+/**
+ * A tank tower with a weak shielding pulse. Its primary job is to draw
+ * nearby tower-eating enemies and survive their attacks, not to add material
+ * area damage to the defense line.
+ */
+export interface BulwarkTowerStats
+  extends TowerStatsBase<'bulwark', 'bulwark'> {
+  /** H² radius in which the wall outranks normal tower-assault targets. */
+  tauntRadius: number;
+  /** Intrinsic multiplier for damage received from enemies before fortify. */
+  incomingDamageMultiplier: number;
+}
+
 export interface TowerStatsByKind {
   sector: SectorTowerStats;
   prism: PrismTowerStats;
@@ -84,6 +108,8 @@ export interface TowerStatsByKind {
   anchor: AnchorTowerStats;
   arc: ArcTowerStats;
   sniper: SniperTowerStats;
+  support: SupportTowerStats;
+  bulwark: BulwarkTowerStats;
 }
 
 export type TowerStats = TowerStatsByKind[TowerKind];
@@ -103,6 +129,8 @@ export interface TowerHealthSegments {
 export type SectorTowerHealthSegments = TowerHealthSegments;
 
 export const SECTOR_TOWER_HEALTH_PER_SEGMENT = 50;
+/** A wall has far more raw health, but still occupies one compact pip row. */
+export const BULWARK_TOWER_HEALTH_SEGMENTS = 8;
 
 const SECTOR_STATS_BY_LEVEL: readonly SectorTowerStats[] = [
   {
@@ -311,6 +339,78 @@ const SNIPER_STATS_BY_LEVEL: readonly SniperTowerStats[] = [
   },
 ];
 
+const SUPPORT_STATS_BY_LEVEL: readonly SupportTowerStats[] = [
+  {
+    kind: 'support',
+    level: 1,
+    maxHealth: 260,
+    damage: 6,
+    range: 1.45,
+    attackMode: 'support',
+    attackIntervalSeconds: 1.2,
+    auraDamageMultiplier: 1.12,
+    allyHealPerSecond: 6,
+  },
+  {
+    kind: 'support',
+    level: 2,
+    maxHealth: 360,
+    damage: 10,
+    range: 1.75,
+    attackMode: 'support',
+    attackIntervalSeconds: 1,
+    auraDamageMultiplier: 1.2,
+    allyHealPerSecond: 10,
+  },
+  {
+    kind: 'support',
+    level: 3,
+    maxHealth: 490,
+    damage: 16,
+    range: 2.05,
+    attackMode: 'support',
+    attackIntervalSeconds: 0.85,
+    auraDamageMultiplier: 1.3,
+    allyHealPerSecond: 16,
+  },
+];
+
+const BULWARK_STATS_BY_LEVEL: readonly BulwarkTowerStats[] = [
+  {
+    kind: 'bulwark',
+    level: 1,
+    maxHealth: 800,
+    damage: 1,
+    range: 0.78,
+    attackMode: 'bulwark',
+    attackIntervalSeconds: 1.15,
+    tauntRadius: 0.78,
+    incomingDamageMultiplier: 0.58,
+  },
+  {
+    kind: 'bulwark',
+    level: 2,
+    maxHealth: 1150,
+    damage: 2,
+    range: 0.95,
+    attackMode: 'bulwark',
+    attackIntervalSeconds: 0.95,
+    tauntRadius: 0.95,
+    incomingDamageMultiplier: 0.48,
+  },
+  {
+    kind: 'bulwark',
+    level: 3,
+    maxHealth: 1600,
+    damage: 4,
+    range: 1.15,
+    attackMode: 'bulwark',
+    attackIntervalSeconds: 0.75,
+    tauntRadius: 1.15,
+    incomingDamageMultiplier: 0.38,
+  },
+];
+
 const STATS_BY_KIND: {
   readonly [Kind in TowerKind]: readonly TowerStatsForKind<Kind>[];
 } = {
@@ -320,6 +420,8 @@ const STATS_BY_KIND: {
   anchor: ANCHOR_STATS_BY_LEVEL,
   arc: ARC_STATS_BY_LEVEL,
   sniper: SNIPER_STATS_BY_LEVEL,
+  support: SUPPORT_STATS_BY_LEVEL,
+  bulwark: BULWARK_STATS_BY_LEVEL,
 };
 
 function normalizeTowerLevel(level: number): number {
@@ -347,20 +449,44 @@ export function getSectorTowerStats(level: number): SectorTowerStats {
  * Converts a tower's current health into square-pip state. Invalid health is
  * treated as empty, while values above the level maximum are capped.
  */
+export function getTowerHealthSegmentsForMaxHealth(
+  kind: TowerKind,
+  maxHealth: number,
+  health: number,
+): TowerHealthSegments {
+  const safeMaxHealth = Number.isFinite(maxHealth) && maxHealth > 0
+    ? maxHealth
+    : 0;
+  const clampedHealth = Number.isFinite(health)
+    ? Math.min(safeMaxHealth, Math.max(0, health))
+    : 0;
+  const totalSegments =
+    kind === 'bulwark'
+      ? BULWARK_TOWER_HEALTH_SEGMENTS
+      : Math.ceil(safeMaxHealth / SECTOR_TOWER_HEALTH_PER_SEGMENT);
+  const healthPerSegment =
+    kind === 'bulwark'
+      ? safeMaxHealth / BULWARK_TOWER_HEALTH_SEGMENTS
+      : SECTOR_TOWER_HEALTH_PER_SEGMENT;
+
+  return {
+    totalSegments,
+    filledSegments:
+      healthPerSegment > 0 ? Math.ceil(clampedHealth / healthPerSegment) : 0,
+  };
+}
+
+/** Converts catalog health into compact square-pip state for one tower. */
 export function getTowerHealthSegments(
   kind: TowerKind,
   level: number,
   health: number,
 ): TowerHealthSegments {
-  const maxHealth = getTowerStats(kind, level).maxHealth;
-  const clampedHealth = Number.isFinite(health)
-    ? Math.min(maxHealth, Math.max(0, health))
-    : 0;
-
-  return {
-    totalSegments: Math.ceil(maxHealth / SECTOR_TOWER_HEALTH_PER_SEGMENT),
-    filledSegments: Math.ceil(clampedHealth / SECTOR_TOWER_HEALTH_PER_SEGMENT),
-  };
+  return getTowerHealthSegmentsForMaxHealth(
+    kind,
+    getTowerStats(kind, level).maxHealth,
+    health,
+  );
 }
 
 /** Original sector-only health-pip API retained for existing callers. */

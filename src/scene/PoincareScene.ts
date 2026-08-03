@@ -32,6 +32,11 @@ import {
   type PlayerResources,
 } from '../game/playerResources';
 import {
+  applyEnemyDamageResistance,
+  getTowerDamageType,
+  type DamageType,
+} from '../game/damageResistance';
+import {
   getTowerBuildCost,
   getTowerRefund,
   type TowerKind,
@@ -47,7 +52,7 @@ import {
   type TowerAttackTimingRequest,
 } from '../game/towerAttackTiming';
 import {
-  getFortifiedTowerDamage,
+  getTowerAssaultDamage,
   getTowerAttackIntervalSeconds,
 } from '../game/towerEnchantmentCombat';
 import {
@@ -57,6 +62,16 @@ import {
   type TowerEnchantmentKind,
 } from '../game/towerEnchantments';
 import { resolveTowerMaintenance } from '../game/towerMaintenance';
+import { getTowerRingDamageMultiplier } from '../game/towerRingRules';
+import {
+  getSupportAuraTargets,
+  resolveTowerSupportAura,
+  type SupportAuraTower,
+} from '../game/towerSupport';
+import {
+  getSpecialTileEffect,
+  type SpecialTileKind,
+} from '../game/specialTiles';
 import {
   resolveTowerAssaultFrame,
   type TowerAssaultClock,
@@ -162,6 +177,7 @@ interface PendingMonsterImpact {
   readonly sequence: number;
   readonly enemyId: string;
   readonly damage: number;
+  readonly damageType: DamageType;
   readonly slow?: SlowEffect;
   readonly knockbackDistance: number;
 }
@@ -194,6 +210,7 @@ export class PoincareScene {
   private readonly warpedSegments: WarpedSegments[] = [];
   private readonly warpedRoutes: WarpedRoute[] = [];
   private readonly buildableTiles: HyperbolicTile[] = [];
+  private readonly specialTiles = new Map<string, SpecialTileKind>();
   private readonly towers = new TowerCollection(this.scene, WORLD_RADIUS);
   private readonly enemies = new EnemyManager(this.scene, WORLD_RADIUS);
   private readonly towerAttackEffects = new TowerAttackEffects(
@@ -295,12 +312,20 @@ export class PoincareScene {
     );
     this.composer.addPass(new OutputPass());
 
-    const battlefield = createBattlefieldVisuals(this.scene, WORLD_RADIUS);
+    const battlefield = createBattlefieldVisuals(
+      this.scene,
+      WORLD_RADIUS,
+      this.level.loadout.specialTiles,
+      getCampaignLevelNumber(this.level.id),
+    );
     this.lineMaterials.push(...battlefield.lineMaterials);
     this.warpedMeshes.push(...battlefield.warpedMeshes);
     this.warpedSegments.push(...battlefield.warpedSegments);
     this.warpedRoutes.push(...battlefield.warpedRoutes);
     this.buildableTiles.push(...battlefield.buildableTiles);
+    for (const [tileId, kind] of battlefield.specialTiles) {
+      this.specialTiles.set(tileId, kind);
+    }
     this.scene.add(this.base.group);
     this.overlays = new BattlefieldOverlays(this.scene, WORLD_RADIUS);
     this.attackSector = new HyperbolicAttackSector(this.scene, WORLD_RADIUS);
@@ -416,7 +441,10 @@ export class PoincareScene {
     this.selectedTower = null;
     this.selectedBuildTile = tile;
     this.selectedBase = false;
-    this.menus.showBuild(this.playerResources.amount);
+    this.menus.showBuild(
+      this.playerResources.amount,
+      this.specialTiles.get(tile.id),
+    );
     this.refreshPlacementHighlight();
     this.refreshBaseRangeIndicator();
     this.refreshAttackSector();
@@ -435,6 +463,7 @@ export class PoincareScene {
       this.playerResources.amount,
       tower.enchantments,
       tower.maxHealth,
+      this.getTowerOutgoingDamageMultiplier(tower),
     );
     this.refreshPlacementHighlight();
     this.refreshBaseRangeIndicator();
@@ -468,7 +497,10 @@ export class PoincareScene {
 
   private refreshOpenMenu(): void {
     if (this.selectedBuildTile) {
-      this.menus.showBuild(this.playerResources.amount);
+      this.menus.updateBuild(
+        this.playerResources.amount,
+        this.specialTiles.get(this.selectedBuildTile.id),
+      );
     } else if (this.selectedTower) {
       this.menus.updateTower(
         this.selectedTower.kind,
@@ -477,10 +509,38 @@ export class PoincareScene {
         this.playerResources.amount,
         this.selectedTower.enchantments,
         this.selectedTower.maxHealth,
+        this.getTowerOutgoingDamageMultiplier(this.selectedTower),
       );
     } else if (this.selectedBase) {
       this.menus.updateBase(this.baseProgression, this.playerResources.amount);
     }
+  }
+
+  private getTowerOutgoingDamageMultiplier(tower: PlacedTower): number {
+    const supportAura = resolveTowerSupportAura(
+      this.toSupportAuraTower(tower),
+      this.getSupportAuraTowers(),
+    );
+    return (
+      getTowerRingDamageMultiplier(tower.tile.ring) *
+      getSpecialTileEffect(this.specialTiles.get(tower.tile.id)).damageMultiplier *
+      supportAura.damageMultiplier
+    );
+  }
+
+  private toSupportAuraTower(tower: PlacedTower): SupportAuraTower {
+    return {
+      id: tower.tile.id,
+      kind: tower.kind,
+      level: tower.level,
+      position: tower.tile.center,
+    };
+  }
+
+  private getSupportAuraTowers(): SupportAuraTower[] {
+    return this.towers.activeTowers().map((tower) =>
+      this.toSupportAuraTower(tower),
+    );
   }
 
   private projectCanonicalPoint(
@@ -866,7 +926,13 @@ export class PoincareScene {
 
   /** Applies one resolved attack for every ready tower in canonical H² space. */
   private resolveTowerAttacks(): void {
-    for (const tower of this.towers.activeTowers()) {
+    const activeTowers = this.towers.activeTowers();
+    const supportAuraTowers = activeTowers.map((tower) =>
+      this.toSupportAuraTower(tower),
+    );
+    const activeEnemies = this.enemies.activeEnemies();
+
+    for (const tower of activeTowers) {
       if (this.battleResult !== null) {
         return;
       }
@@ -875,20 +941,23 @@ export class PoincareScene {
         continue;
       }
 
-      const activeEnemies = this.enemies.activeEnemies();
-      if (activeEnemies.length === 0) {
-        return;
-      }
       const stats = getTowerStats(tower.kind, tower.level);
+      if (activeEnemies.length === 0 && stats.attackMode !== 'support') {
+        continue;
+      }
       const enchantmentEffects = getTowerEnchantmentEffects(
         tower.enchantments,
       );
-      const attackIntervalSeconds = getTowerAttackIntervalSeconds(
-        stats.attackIntervalSeconds,
-        tower.enchantments,
-      );
+      const attackIntervalSeconds =
+        getTowerAttackIntervalSeconds(
+          stats.attackIntervalSeconds,
+          tower.enchantments,
+        ) *
+        getSpecialTileEffect(
+          this.specialTiles.get(tower.tile.id),
+        ).attackIntervalMultiplier;
       if (stats.attackMode === 'sector') {
-        // Unlike the other four tower families, the sector guard fires a
+        // Unlike the other tower families, the sector guard fires a
         // physical travelling H² pulse. It may damage only when its front
         // catches an enemy later in the simulation, not at this moment.
         this.emitSectorPulse(tower);
@@ -917,9 +986,20 @@ export class PoincareScene {
           health: enemy.health,
         })),
       );
-      if (resolution.effects.length === 0) {
+      if (
+        resolution.effects.length === 0 &&
+        stats.attackMode !== 'support'
+      ) {
         continue;
       }
+
+      const supportTargets =
+        stats.attackMode === 'support'
+          ? getSupportAuraTargets(
+              this.toSupportAuraTower(tower),
+              supportAuraTowers,
+            ).map((target) => target.position)
+          : undefined;
 
       const attackRequest: TowerAttackTimingRequest = {
         kind: tower.kind,
@@ -929,6 +1009,7 @@ export class PoincareScene {
           return target ? [target] : [];
         }),
         range: stats.range,
+        ...(supportTargets ? { supportTargets } : {}),
       };
       this.towerAttackEffects.emit(attackRequest, this.viewTransform);
 
@@ -938,8 +1019,13 @@ export class PoincareScene {
       );
       this.queueMonsterImpacts(
         attackRequest,
-        resolution.effects,
+        resolution.effects.map((effect) => ({
+          ...effect,
+          damage:
+            effect.damage * this.getTowerOutgoingDamageMultiplier(tower),
+        })),
         enchantmentEffects.knockbackDistance,
+        getTowerDamageType(tower.kind),
       );
     }
   }
@@ -953,6 +1039,7 @@ export class PoincareScene {
     request: TowerAttackTimingRequest,
     effects: readonly TowerCombatEffect[],
     knockbackDistance: number,
+    damageType: DamageType,
   ): void {
     const impactDelays = getTowerAttackImpactDelays(request);
     for (const [index, effect] of effects.entries()) {
@@ -965,6 +1052,7 @@ export class PoincareScene {
         sequence: this.nextMonsterImpactSequence,
         enemyId: effect.enemyId,
         damage: effect.damage,
+        damageType,
         ...(effect.slow ? { slow: effect.slow } : {}),
         knockbackDistance,
       });
@@ -1000,7 +1088,7 @@ export class PoincareScene {
       if (impact.slow) {
         this.applySlowEffect(impact.enemyId, impact.slow);
       }
-      this.damageEnemy(impact.enemyId, impact.damage);
+      this.damageEnemy(impact.enemyId, impact.damage, impact.damageType);
       this.applyEnemyKnockback(
         impact.enemyId,
         impact.knockbackDistance,
@@ -1021,7 +1109,7 @@ export class PoincareScene {
         origin: { x: tower.tile.center.x, y: tower.tile.center.y },
         range: stats.range,
         fullAngleRadians: stats.attackAngleRadians,
-        damage: stats.damage,
+        damage: stats.damage * this.getTowerOutgoingDamageMultiplier(tower),
       }),
     );
     if (knockbackDistance > 0) {
@@ -1081,7 +1169,11 @@ export class PoincareScene {
     // Apply only after every pulse has sampled the same enemy snapshot, so a
     // kill/removal cannot alter another pulse's collision step.
     for (const hit of hits) {
-      this.damageEnemy(hit.enemyId, hit.damage);
+      this.damageEnemy(
+        hit.enemyId,
+        hit.damage,
+        getTowerDamageType('sector'),
+      );
       this.applyEnemyKnockback(hit.enemyId, hit.knockbackDistance);
     }
   }
@@ -1142,6 +1234,7 @@ export class PoincareScene {
       attackRequest,
       [{ enemyId: target.id, damage: stats.targetDamage }],
       0,
+      'pure',
     );
   }
 
@@ -1240,11 +1333,17 @@ export class PoincareScene {
         position: enemy.canonicalPosition,
         contactDamage: enemy.contactDamage,
       })),
-      this.towers.activeTowers().map((tower) => ({
-        id: tower.tile.id,
-        position: tower.tile.center,
-        health: tower.health,
-      })),
+      this.towers.activeTowers().map((tower) => {
+        const stats = getTowerStats(tower.kind, tower.level);
+        return {
+          id: tower.tile.id,
+          position: tower.tile.center,
+          health: tower.health,
+          ...(stats.attackMode === 'bulwark'
+            ? { tauntRadius: stats.tauntRadius }
+            : {}),
+        };
+      }),
       this.towerAssaultClocks,
     );
 
@@ -1262,7 +1361,12 @@ export class PoincareScene {
         continue;
       }
 
-      const damage = getFortifiedTowerDamage(hit.damage, tower.enchantments);
+      const damage = getTowerAssaultDamage(
+        tower.kind,
+        tower.level,
+        hit.damage,
+        tower.enchantments,
+      );
       if (damage <= 0) {
         continue;
       }
@@ -1282,14 +1386,25 @@ export class PoincareScene {
 
   /** Resolves tower-local passive repair and one deterministic ally target. */
   private resolveTowerMaintenance(simulationDelta: number): void {
+    const supportAuraTowers = this.getSupportAuraTowers();
     const updates = resolveTowerMaintenance(
-      this.towers.activeTowers().map((tower) => ({
-        id: tower.tile.id,
-        position: tower.tile.center,
-        health: tower.health,
-        maxHealth: tower.maxHealth,
-        enchantments: tower.enchantments,
-      })),
+      this.towers.activeTowers().map((tower) => {
+        const supportAura = resolveTowerSupportAura(
+          this.toSupportAuraTower(tower),
+          supportAuraTowers,
+        );
+        return {
+          id: tower.tile.id,
+          position: tower.tile.center,
+          health: tower.health,
+          maxHealth: tower.maxHealth,
+          enchantments: tower.enchantments,
+          externalHealingPerSecond:
+            getSpecialTileEffect(
+              this.specialTiles.get(tower.tile.id),
+            ).healingPerSecond + supportAura.healingPerSecond,
+        };
+      }),
       simulationDelta,
     );
 
@@ -1308,12 +1423,26 @@ export class PoincareScene {
     }
   }
 
-  private damageEnemy(enemyId: string, damage: number): void {
+  private damageEnemy(
+    enemyId: string,
+    damage: number,
+    damageType: DamageType,
+  ): void {
     const enemy = this.enemies.get(enemyId);
-    const appliedDamage = Number.isFinite(damage)
-      ? Math.max(0, Math.round(damage))
+    if (!enemy) {
+      return;
+    }
+    // Resistance is sampled only when the visible effect reaches its target.
+    // The projectile or pulse therefore remains the authoritative hit clock.
+    const resistedDamage = applyEnemyDamageResistance(
+      damage,
+      enemy.kind,
+      damageType,
+    );
+    const appliedDamage = Number.isFinite(resistedDamage)
+      ? Math.max(0, Math.round(resistedDamage))
       : 0;
-    if (!enemy || appliedDamage === 0) {
+    if (appliedDamage === 0) {
       return;
     }
 
@@ -1384,10 +1513,16 @@ export class PoincareScene {
     }
 
     this.waveState = nextWaveState;
-    const healthMultiplier = this.activeWavePlan[0]?.healthMultiplier ?? 1;
+    const activeWaveSpawn = this.activeWavePlan[0];
+    const healthMultiplier = activeWaveSpawn?.healthMultiplier ?? 1;
+    const contactMultiplier = activeWaveSpawn?.contactMultiplier ?? 1;
     for (const descriptor of descriptors) {
       this.enemies.spawn(
-        createReinforcementEnemySpawn(descriptor, healthMultiplier),
+        createReinforcementEnemySpawn(
+          descriptor,
+          healthMultiplier,
+          contactMultiplier,
+        ),
         this.viewTransform,
       );
     }

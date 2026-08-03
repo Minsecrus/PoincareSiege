@@ -28,8 +28,14 @@ function tower(
   id: string,
   position: Vec2,
   health?: number,
+  tauntRadius?: number,
 ): TowerAssaultTower {
-  return health === undefined ? { id, position } : { id, position, health };
+  return {
+    id,
+    position,
+    ...(health === undefined ? {} : { health }),
+    ...(tauntRadius === undefined ? {} : { tauntRadius }),
+  };
 }
 
 describe('tower assault', () => {
@@ -65,6 +71,43 @@ describe('tower assault', () => {
     });
 
     expect(result.target?.towerId).toBe('alpha');
+  });
+
+  it('prioritizes a living bulwark inside its own taunt radius over a closer normal tower', () => {
+    const result = resolveTowerAssault(enemy(), [
+      tower('weapon', pointAt(1.05), 100),
+      tower('bulwark', pointAt(1.62), 800, 0.78),
+    ]);
+
+    expect(result.target).toEqual({
+      towerId: 'bulwark',
+      distance: expect.closeTo(0.62, 8),
+    });
+    expect(result.attack?.targetTowerId).toBe('bulwark');
+    expect(result.shouldPauseMovement).toBe(true);
+  });
+
+  it('uses normal closest-target behavior when no bulwark taunt radius reaches the enemy', () => {
+    const result = resolveTowerAssault(enemy(), [
+      tower('weapon', pointAt(1.05), 100),
+      tower('bulwark', pointAt(1.62), 800, 0.4),
+    ]);
+
+    expect(result.target?.towerId).toBe('weapon');
+  });
+
+  it('chooses the nearest bulwark then its id when several taunts are eligible', () => {
+    const byDistance = resolveTowerAssault(enemy(), [
+      tower('far-wall', pointAt(1.5), 800, 0.8),
+      tower('near-wall', pointAt(1.3), 800, 0.8),
+    ]);
+    const byId = resolveTowerAssault(enemy(), [
+      tower('zeta', pointAt(1.4, 0.03), 800, 0.8),
+      tower('alpha', pointAt(1.4, -0.03), 800, 0.8),
+    ]);
+
+    expect(byDistance.target?.towerId).toBe('near-wall');
+    expect(byId.target?.towerId).toBe('alpha');
   });
 
   it('does not stop for a destroyed tower and returns no attack when none remain nearby', () => {

@@ -26,6 +26,7 @@ describe('campaign levels', () => {
       towerKinds: ['sector'],
       enchantments: [],
       baseSkills: [],
+      specialTiles: [],
     });
     expect(level.waves.map((wave) => wave.length)).toEqual([4, 6, 8]);
     expect(level.waves.flat().every((spawn) => spawn.kind === 'basic')).toBe(
@@ -42,24 +43,64 @@ describe('campaign levels', () => {
     ]);
   });
 
-  it('unlocks towers, enchantments, and base skills in deliberate teaching order', () => {
-    expect(getCampaignLevel('level-2').loadout.towerKinds).toEqual([
-      'sector',
-      'prism',
+  it('unlocks special tiles, support, and bulwark tools in deliberate teaching order', () => {
+    expect(CAMPAIGN_LEVELS.map((level) => level.loadout.specialTiles)).toEqual([
+      [],
+      [],
+      ['repair'],
+      ['repair', 'haste'],
+      ['repair', 'haste', 'power'],
+      ['repair', 'haste', 'power'],
+      ['repair', 'haste', 'power'],
     ]);
-    expect(getCampaignLevel('level-3').loadout.baseSkills).toEqual([
-      'vitality',
+    expect(CAMPAIGN_LEVELS.map((level) => level.loadout.towerKinds)).toEqual([
+      ['sector'],
+      ['sector', 'prism'],
+      ['sector', 'prism', 'pulse'],
+      ['sector', 'prism', 'pulse', 'anchor'],
+      ['sector', 'prism', 'pulse', 'anchor', 'arc', 'support', 'bulwark'],
+      [
+        'sector',
+        'prism',
+        'pulse',
+        'anchor',
+        'arc',
+        'sniper',
+        'support',
+        'bulwark',
+      ],
+      [
+        'sector',
+        'prism',
+        'pulse',
+        'anchor',
+        'arc',
+        'sniper',
+        'support',
+        'bulwark',
+      ],
     ]);
-    expect(getCampaignLevel('level-4').loadout.enchantments).toContain(
-      'fortify',
-    );
-    expect(getCampaignLevel('level-5').loadout.towerKinds).toContain('arc');
-    expect(getCampaignLevel('level-6').loadout.towerKinds).toContain(
-      'sniper',
-    );
-    expect(getCampaignLevel('level-7').loadout.enchantments).toContain(
-      'knockback',
-    );
+  });
+
+  it('preserves the authored enchantment and base-skill teaching order', () => {
+    expect(CAMPAIGN_LEVELS.map((level) => level.loadout.enchantments)).toEqual([
+      [],
+      ['selfRepair'],
+      ['selfRepair', 'attackSpeed'],
+      ['selfRepair', 'attackSpeed', 'fortify'],
+      ['selfRepair', 'allyHeal', 'attackSpeed', 'fortify'],
+      ['selfRepair', 'allyHeal', 'attackSpeed', 'fortify'],
+      ['selfRepair', 'allyHeal', 'attackSpeed', 'fortify', 'knockback'],
+    ]);
+    expect(CAMPAIGN_LEVELS.map((level) => level.loadout.baseSkills)).toEqual([
+      [],
+      [],
+      ['vitality'],
+      ['vitality', 'regeneration'],
+      ['vitality', 'regeneration', 'areaPulse'],
+      ['vitality', 'regeneration', 'areaPulse'],
+      ['vitality', 'regeneration', 'areaPulse'],
+    ]);
   });
 
   it('reserves bosses for the level-six finale and the level-seven milestones', () => {
@@ -73,12 +114,58 @@ describe('campaign levels', () => {
     expect(bossWaves('level-7')).toEqual([4, 8, 12]);
   });
 
+  it('raises only the post-unlock enemy pressure to meet outer-ring firepower', () => {
+    const earlyLevels = CAMPAIGN_LEVELS.slice(0, 4);
+    expect(earlyLevels.flatMap((level) => level.waves).flat().every(
+      (spawn) => spawn.contactMultiplier === undefined,
+    )).toBe(true);
+
+    const levelFive = getCampaignLevel('level-5');
+    const levelSix = getCampaignLevel('level-6');
+    const levelSeven = getCampaignLevel('level-7');
+    expect(levelFive.waves[0][0]).toMatchObject({
+      healthMultiplier: 2,
+      contactMultiplier: 1,
+    });
+    expect(levelFive.waves[7][0]).toMatchObject({
+      healthMultiplier: 4.4,
+      contactMultiplier: 1.12,
+    });
+    expect(levelSix.waves[0][0]).toMatchObject({
+      healthMultiplier: 3,
+      contactMultiplier: 1.08,
+    });
+    expect(levelSix.waves[9][0]).toMatchObject({
+      healthMultiplier: 8.2,
+      contactMultiplier: 1.25,
+    });
+    expect(levelSeven.waves[0][0]).toMatchObject({
+      healthMultiplier: 5,
+      contactMultiplier: 1.16,
+    });
+    expect(levelSeven.waves[11][0]).toMatchObject({
+      healthMultiplier: 18.2,
+      contactMultiplier: 1.38,
+    });
+  });
+
   it('keeps authored waves immutable, deterministic, and below the old 50x health ceiling', () => {
     const finalWave = getCampaignWavePlan('level-7', 12);
     expect(finalWave).toBe(getCampaignWavePlan('level-7', 12));
-    expect(Math.max(...finalWave.map((spawn) => spawn.healthMultiplier))).toBe(
-      3.88,
-    );
+    expect(
+      Math.max(...finalWave.map((spawn) => spawn.healthMultiplier)),
+    ).toBeCloseTo(27.3);
+    expect(finalWave).toHaveLength(45);
+    const boss = finalWave.find((spawn) => spawn.kind === 'boss');
+    expect(boss).toMatchObject({
+      contactMultiplier: 1.38,
+      routeBehavior: 'direct',
+    });
+    expect(boss?.healthMultiplier).toBeCloseTo(27.3);
+    const directRouteShare =
+      finalWave.filter((spawn) => spawn.routeBehavior === 'direct').length /
+      finalWave.length;
+    expect(directRouteShare).toBeGreaterThanOrEqual(0.25);
     expect(new Set(finalWave.map((spawn) => spawn.routeSeed)).size).toBe(
       finalWave.length,
     );

@@ -43,7 +43,7 @@ describe('tower catalog stats', () => {
     expect(levelThree.attackAngleRadians).toBeCloseTo((11 * Math.PI) / 9);
   });
 
-  it('defines all five tower families at every level with integral combat values', () => {
+  it('defines all tower families at every level with integral combat values', () => {
     expect(TOWER_KINDS).toEqual([
       'sector',
       'prism',
@@ -51,6 +51,8 @@ describe('tower catalog stats', () => {
       'anchor',
       'arc',
       'sniper',
+      'support',
+      'bulwark',
     ] satisfies readonly TowerKind[]);
 
     for (const kind of TOWER_KINDS) {
@@ -83,6 +85,8 @@ describe('tower catalog stats', () => {
     const anchor = getTowerStats('anchor', 1);
     const arc = getTowerStats('arc', 1);
     const sniper = getTowerStats('sniper', 1);
+    const support = getTowerStats('support', 1);
+    const bulwark = getTowerStats('bulwark', 1);
 
     expect(sector).toMatchObject({
       attackMode: 'sector',
@@ -114,6 +118,75 @@ describe('tower catalog stats', () => {
       damage: 115,
       range: 3.2,
     });
+    expect(support).toMatchObject({
+      attackMode: 'support',
+      maxHealth: 260,
+      damage: 6,
+      range: 1.45,
+      attackIntervalSeconds: 1.2,
+      auraDamageMultiplier: 1.12,
+      allyHealPerSecond: 6,
+    });
+    expect(bulwark).toMatchObject({
+      attackMode: 'bulwark',
+      maxHealth: 800,
+      damage: 1,
+      range: 0.78,
+      attackIntervalSeconds: 1.15,
+      tauntRadius: 0.78,
+      incomingDamageMultiplier: 0.58,
+    });
+  });
+
+  it('scales support damage, aura strength, healing, and range by rank', () => {
+    expect(getTowerStats('support', 1)).toMatchObject({
+      maxHealth: 260,
+      damage: 6,
+      range: 1.45,
+      attackIntervalSeconds: 1.2,
+      auraDamageMultiplier: 1.12,
+      allyHealPerSecond: 6,
+    });
+    expect(getTowerStats('support', 2)).toMatchObject({
+      maxHealth: 360,
+      damage: 10,
+      range: 1.75,
+      attackIntervalSeconds: 1,
+      auraDamageMultiplier: 1.2,
+      allyHealPerSecond: 10,
+    });
+    expect(getTowerStats('support', 3)).toMatchObject({
+      maxHealth: 490,
+      damage: 16,
+      range: 2.05,
+      attackIntervalSeconds: 0.85,
+      auraDamageMultiplier: 1.3,
+      allyHealPerSecond: 16,
+    });
+  });
+
+  it('scales bulwark health, taunt reach, and damage reduction by rank', () => {
+    expect(getTowerStats('bulwark', 1)).toMatchObject({
+      maxHealth: 800,
+      damage: 1,
+      range: 0.78,
+      tauntRadius: 0.78,
+      incomingDamageMultiplier: 0.58,
+    });
+    expect(getTowerStats('bulwark', 2)).toMatchObject({
+      maxHealth: 1150,
+      damage: 2,
+      range: 0.95,
+      tauntRadius: 0.95,
+      incomingDamageMultiplier: 0.48,
+    });
+    expect(getTowerStats('bulwark', 3)).toMatchObject({
+      maxHealth: 1600,
+      damage: 4,
+      range: 1.15,
+      tauntRadius: 1.15,
+      incomingDamageMultiplier: 0.38,
+    });
   });
 
   it('clamps invalid levels to the same one-to-three range as tower economy', () => {
@@ -138,6 +211,16 @@ describe('tower catalog stats', () => {
     expect(getTowerHealthSegments('anchor', 3, 1)).toEqual({
       totalSegments: 12,
       filledSegments: 1,
+    });
+    // The wall needs much more raw health than a weapon tower, but the menu
+    // remains a compact row of unreadable-at-a-glance health squares.
+    expect(getTowerHealthSegments('bulwark', 3, 800)).toEqual({
+      totalSegments: 8,
+      filledSegments: 4,
+    });
+    expect(getTowerHealthSegments('bulwark', 3, 1_600)).toEqual({
+      totalSegments: 8,
+      filledSegments: 8,
     });
   });
 

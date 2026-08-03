@@ -53,4 +53,22 @@ describe('tower maintenance', () => {
     expect(resolveTowerMaintenance(towers, 0)).toEqual([]);
     expect(towers).toEqual(before);
   });
+
+  it('combines terrain and support healing through one capped external rate', () => {
+    expect(
+      resolveTowerMaintenance(
+        [
+          {
+            id: 'supported',
+            position: { x: 0, y: 0 },
+            health: 72,
+            maxHealth: 100,
+            enchantments: NONE,
+            externalHealingPerSecond: 18,
+          },
+        ],
+        2,
+      ),
+    ).toEqual([{ towerId: 'supported', health: 100 }]);
+  });
 });

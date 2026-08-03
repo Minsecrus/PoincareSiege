@@ -3,6 +3,7 @@ import {
   getTowerEnchantmentEffects,
   type TowerEnchantmentLevels,
 } from './towerEnchantments';
+import { getTowerStats, type TowerKind } from './towerStats';
 
 const COMPARISON_EPSILON = 1e-9;
 
@@ -153,6 +154,23 @@ export function getFortifiedTowerDamage(
     finiteNonNegative(incomingDamage) *
     getTowerIncomingDamageMultiplier(levels)
   );
+}
+
+/**
+ * Applies a tower family's inherent armour first, then its purchased
+ * fortification. Ordinary towers deliberately retain the legacy 1× baseline;
+ * only the bulwark has an authored intrinsic mitigation value.
+ */
+export function getTowerAssaultDamage(
+  kind: TowerKind,
+  level: number,
+  incomingDamage: number,
+  levels: TowerEnchantmentLevels,
+): number {
+  const stats = getTowerStats(kind, level);
+  const inherentMultiplier =
+    stats.attackMode === 'bulwark' ? stats.incomingDamageMultiplier : 1;
+  return getFortifiedTowerDamage(incomingDamage * inherentMultiplier, levels);
 }
 
 /** Restores health at a fixed rate, while always respecting the current cap. */

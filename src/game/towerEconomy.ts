@@ -8,6 +8,8 @@ export const TOWER_KINDS = [
   'anchor',
   'arc',
   'sniper',
+  'support',
+  'bulwark',
 ] as const;
 
 export type TowerKind = (typeof TOWER_KINDS)[number];
@@ -49,6 +51,16 @@ const TOWER_ECONOMY_BY_KIND: Record<TowerKind, TowerEconomy> = {
   sniper: {
     buildCost: 240,
     upgradeCosts: [190, 300],
+  },
+  support: {
+    buildCost: 200,
+    upgradeCosts: [150, 230],
+  },
+  // A defensive specialist. Its large health pool and mitigation trade away
+  // ordinary weapon damage for enough time to protect nearby damage dealers.
+  bulwark: {
+    buildCost: 230,
+    upgradeCosts: [180, 280],
   },
 };
 
