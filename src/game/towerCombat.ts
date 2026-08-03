@@ -22,6 +22,12 @@ export interface CombatTower {
 export interface CombatEnemy {
   id: string;
   position: Vec2;
+  /**
+   * Current hit points when the caller needs health-priority targeting.
+   * Missing or invalid values are treated as zero so older area-attack
+   * callers remain compatible.
+   */
+  health?: number;
 }
 
 /** A speed multiplier applied for the supplied duration. */
@@ -90,6 +96,34 @@ function sortByDistance(
     return Math.abs(difference) <= COMPARISON_EPSILON
       ? compareIds(left, right)
       : difference;
+  });
+}
+
+function getComparableHealth(enemy: CombatEnemy): number {
+  return Number.isFinite(enemy.health) ? Math.max(0, enemy.health ?? 0) : 0;
+}
+
+/**
+ * Highest current health wins; equal health resolves by closest H² distance,
+ * then by ID, so a sniper target never depends on input order.
+ */
+function sortByHighestHealth(
+  source: Vec2,
+  enemies: readonly CombatEnemy[],
+): CombatEnemy[] {
+  return [...enemies].sort((left, right) => {
+    const healthDifference =
+      getComparableHealth(right) - getComparableHealth(left);
+    if (Math.abs(healthDifference) > COMPARISON_EPSILON) {
+      return healthDifference;
+    }
+
+    const distanceDifference =
+      hyperbolicDistance(source, left.position) -
+      hyperbolicDistance(source, right.position);
+    return Math.abs(distanceDifference) <= COMPARISON_EPSILON
+      ? compareIds(left, right)
+      : distanceDifference;
   });
 }
 
@@ -402,6 +436,27 @@ function resolveArc(
   );
 }
 
+function resolveSniper(
+  tower: CombatTower,
+  enemies: readonly CombatEnemy[],
+): TowerCombatResolution {
+  const stats = getTowerStats(tower.kind, tower.level);
+  if (stats.attackMode !== 'single-target') {
+    return createResolution([], () => 0);
+  }
+
+  const target = sortByHighestHealth(
+    tower.position,
+    enemies.filter((enemy) =>
+      isWithinHyperbolicRange(tower.position, enemy.position, stats.range),
+    ),
+  )[0];
+
+  return target
+    ? createResolution([target], () => stats.damage)
+    : createResolution([], () => 0);
+}
+
 /**
  * Resolves one attack without mutating tower or enemy state.
  *
@@ -429,5 +484,7 @@ export function resolveTowerCombat(
       return resolveAnchor(tower, validEnemies);
     case 'arc':
       return resolveArc(tower, validEnemies);
+    case 'sniper':
+      return resolveSniper(tower, validEnemies);
   }
 }

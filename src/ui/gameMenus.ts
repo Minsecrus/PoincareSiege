@@ -38,6 +38,19 @@ interface GameMenuActions {
   upgradeBaseSkill: (skill: BaseSkillId) => void;
 }
 
+/** The subset of the global combat kit usable in the current campaign level. */
+export interface GameMenuAvailability {
+  readonly towerKinds: readonly TowerKind[];
+  readonly enchantments: readonly TowerEnchantmentKind[];
+  readonly baseSkills: readonly BaseSkillId[];
+}
+
+const ALL_MENU_AVAILABILITY: GameMenuAvailability = {
+  towerKinds: TOWER_KINDS,
+  enchantments: TOWER_ENCHANTMENT_KINDS,
+  baseSkills: BASE_SKILL_IDS,
+};
+
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
   if (!element) {
@@ -52,6 +65,7 @@ const TOWER_NAMES: Record<TowerKind, string> = {
   pulse: '双曲脉冲',
   anchor: '滞流锚',
   arc: '链式电弧',
+  sniper: '湮灭狙击塔',
 };
 
 const ENCHANTMENT_NAMES: Record<TowerEnchantmentKind, string> = {
@@ -59,6 +73,7 @@ const ENCHANTMENT_NAMES: Record<TowerEnchantmentKind, string> = {
   allyHeal: '友军修复',
   attackSpeed: '攻击速度',
   fortify: '坚固',
+  knockback: '击退',
 };
 
 function isTowerKind(value: string | undefined): value is TowerKind {
@@ -104,8 +119,6 @@ export class GameMenus {
     requireElement<SVGSVGElement>('#tower-special-icon');
   private readonly towerEnchantments =
     requireElement<HTMLDivElement>('#tower-enchantments');
-  private readonly skillPoints =
-    requireElement<HTMLSpanElement>('#base-skill-points');
   private readonly baseHealth =
     requireElement<HTMLElement>('#base-health');
   private readonly baseRegeneration =
@@ -114,9 +127,18 @@ export class GameMenus {
   private readonly baseSkills =
     requireElement<HTMLDivElement>('#base-skills');
   private readonly actions: GameMenuActions;
+  private readonly availableTowerKinds: ReadonlySet<TowerKind>;
+  private readonly availableEnchantments: ReadonlySet<TowerEnchantmentKind>;
+  private readonly availableBaseSkills: ReadonlySet<BaseSkillId>;
 
-  constructor(actions: GameMenuActions) {
+  constructor(
+    actions: GameMenuActions,
+    availability: GameMenuAvailability = ALL_MENU_AVAILABILITY,
+  ) {
     this.actions = actions;
+    this.availableTowerKinds = new Set(availability.towerKinds);
+    this.availableEnchantments = new Set(availability.enchantments);
+    this.availableBaseSkills = new Set(availability.baseSkills);
     this.buildElement.addEventListener('click', this.onBuildTower);
     this.upgradeTowerButton.addEventListener('click', this.onUpgradeTower);
     this.removeTowerButton.addEventListener('click', this.onRemoveTower);
@@ -217,7 +239,6 @@ export class GameMenus {
 
   updateBase(progression: BaseProgression, resourceAmount: number): void {
     const stats = getBaseStats(progression);
-    this.skillPoints.textContent = String(progression.skillPoints);
     const healthSegments = getBaseHealthSegments(progression);
     if (this.baseHealth.childElementCount !== healthSegments.totalSegments) {
       this.baseHealth.replaceChildren(
@@ -237,10 +258,10 @@ export class GameMenus {
       `基地生命 ${Math.ceil(progression.health)} / ${stats.maxHealth}`,
     );
     this.baseRegeneration.textContent = `+${stats.regenerationPerSecond}`;
+    const attackDamage = stats.targetDamage;
+    const attackRange = stats.targetRange;
     this.baseArea.textContent =
-      stats.areaDamage === 0
-        ? '—'
-        : `${stats.areaDamage} · ${stats.areaRadius.toFixed(2)}`;
+      attackDamage === 0 ? '—' : `1×${attackDamage}`;
 
     for (const skill of BASE_SKILL_IDS) {
       const button = this.baseSkills.querySelector<HTMLButtonElement>(
@@ -251,6 +272,14 @@ export class GameMenus {
       );
       if (!button || !level) {
         continue;
+      }
+      if (skill === 'areaPulse') {
+        button.setAttribute(
+          'aria-label',
+          attackDamage === 0
+            ? '学习基地单体锁定攻击'
+            : `升级基地单体锁定攻击，伤害 ${attackDamage}，双曲射程 ${attackRange.toFixed(2)}`,
+        );
       }
       level.querySelectorAll('i').forEach((pip, index) => {
         pip.classList.toggle(
@@ -265,11 +294,19 @@ export class GameMenus {
       if (costElement) {
         costElement.textContent = cost === null ? '—' : String(cost);
       }
+      const isAvailable = this.availableBaseSkills.has(skill);
+      button.hidden = !isAvailable;
       button.disabled =
+        !isAvailable ||
         !canUpgradeBaseSkill(progression, skill) ||
         cost === null ||
         resourceAmount < cost;
     }
+    this.baseSkills.hidden = this.availableBaseSkills.size === 0;
+    this.baseSkills.style.setProperty(
+      '--base-skill-count',
+      String(Math.max(1, this.availableBaseSkills.size)),
+    );
   }
 
   dispose(): void {
@@ -291,7 +328,7 @@ export class GameMenus {
     }
     const button = target.closest<HTMLButtonElement>('[data-tower-kind]');
     const kind = button?.dataset.towerKind;
-    if (isTowerKind(kind)) {
+    if (isTowerKind(kind) && this.availableTowerKinds.has(kind)) {
       this.actions.buildTower(kind);
     }
   };
@@ -319,6 +356,7 @@ export class GameMenus {
     if (
       !button?.disabled &&
       isTowerEnchantmentKind(kind) &&
+      this.availableEnchantments.has(kind) &&
       this.actions.upgradeTowerEnchantment
     ) {
       this.actions.upgradeTowerEnchantment(kind);
@@ -332,7 +370,11 @@ export class GameMenus {
     }
     const button = target.closest<HTMLButtonElement>('[data-base-skill]');
     const skill = button?.dataset.baseSkill as BaseSkillId | undefined;
-    if (!skill || !BASE_SKILL_IDS.includes(skill)) {
+    if (
+      !skill ||
+      !BASE_SKILL_IDS.includes(skill) ||
+      !this.availableBaseSkills.has(skill)
+    ) {
       return;
     }
     this.actions.upgradeBaseSkill(skill);
@@ -344,8 +386,10 @@ export class GameMenus {
       if (!isTowerKind(kind)) {
         continue;
       }
+      const isAvailable = this.availableTowerKinds.has(kind);
       const cost = getTowerBuildCost(kind);
-      button.disabled = resourceAmount < cost;
+      button.hidden = !isAvailable;
+      button.disabled = !isAvailable || resourceAmount < cost;
       button.dataset.buildCost = String(cost);
       button.setAttribute('aria-label', `建造${TOWER_NAMES[kind]}，费用 ${cost}`);
       const costValue = button.querySelector<HTMLElement>(
@@ -355,6 +399,10 @@ export class GameMenus {
         costValue.textContent = String(cost);
       }
     }
+    this.buildElement.style.setProperty(
+      '--build-option-count',
+      String(Math.max(1, this.availableTowerKinds.size)),
+    );
   }
 
   private updateTowerEnchantments(
@@ -372,7 +420,10 @@ export class GameMenus {
 
       const level = levels[kind];
       const cost = getTowerEnchantmentUpgradeCost(kind, level);
+      const isAvailable = this.availableEnchantments.has(kind);
+      button.hidden = !isAvailable;
       button.disabled =
+        !isAvailable ||
         !this.actions.upgradeTowerEnchantment ||
         cost === null ||
         resourceAmount < cost;
@@ -387,13 +438,22 @@ export class GameMenus {
       if (costElement) {
         costElement.textContent = cost === null ? '—' : String(cost);
       }
-      button.setAttribute(
-        'aria-label',
+      const knockbackResistanceNote =
+        kind === 'knockback' ? '，击退抗性期间无效' : '';
+      const ariaStatus =
         cost === null
           ? `${ENCHANTMENT_NAMES[kind]} ${level} / ${TOWER_ENCHANTMENT_MAX_LEVEL} 级，已满级`
-          : `${ENCHANTMENT_NAMES[kind]} ${level} / ${TOWER_ENCHANTMENT_MAX_LEVEL} 级，升级费用 ${cost}`,
+          : `${ENCHANTMENT_NAMES[kind]} ${level} / ${TOWER_ENCHANTMENT_MAX_LEVEL} 级，升级费用 ${cost}`;
+      button.setAttribute(
+        'aria-label',
+        `${ariaStatus}${knockbackResistanceNote}`,
       );
     }
+    this.towerEnchantments.hidden = this.availableEnchantments.size === 0;
+    this.towerEnchantments.style.setProperty(
+      '--enchantment-option-count',
+      String(Math.max(1, this.availableEnchantments.size)),
+    );
   }
 
   private getTowerHealthSegments(
@@ -439,6 +499,8 @@ export class GameMenus {
         };
       case 'chain-arc':
         return { value: `×${stats.chainCount}`, label: `链式跳跃 ${stats.chainCount}` };
+      case 'single-target':
+        return { value: '1×', label: '单体锁定' };
     }
   }
 
@@ -463,6 +525,10 @@ export class GameMenus {
       'chain-arc': [
         'M26 3 11 26h11l-2 19 17-25H26V3Z',
         'M7 19H3v-5h7v4H7v1Zm34 11h4v5h-7v-4h3v-1Z',
+      ],
+      'single-target': [
+        'M24 4a20 20 0 1 1 0 40 20 20 0 0 1 0-40Zm0 5a15 15 0 1 0 0 30 15 15 0 0 0 0-30Zm0 7a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z',
+        'M22 0h4v10h-4zM22 38h4v10h-4zM0 22h10v4H0zM38 22h10v4H38z',
       ],
     };
     this.towerSpecialIcon.replaceChildren(

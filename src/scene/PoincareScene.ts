@@ -17,8 +17,8 @@ import {
   canUpgradeBaseSkill,
   createBaseProgression,
   getBaseStats,
-  isInsideBaseAttackRange,
   regenerateBase,
+  selectBaseAttackTarget,
   upgradeBaseSkill,
   type BaseSkillId,
 } from '../game/baseProgression';
@@ -37,7 +37,15 @@ import {
   type TowerKind,
 } from '../game/towerEconomy';
 import { getTowerStats } from '../game/towerStats';
-import { resolveTowerCombat } from '../game/towerCombat';
+import {
+  resolveTowerCombat,
+  type SlowEffect,
+  type TowerCombatEffect,
+} from '../game/towerCombat';
+import {
+  getTowerAttackImpactDelays,
+  type TowerAttackTimingRequest,
+} from '../game/towerAttackTiming';
 import {
   getFortifiedTowerDamage,
   getTowerAttackIntervalSeconds,
@@ -45,6 +53,7 @@ import {
 import {
   getTowerEnchantmentUpgradeCost,
   getTowerEnchantmentsRefund,
+  getTowerEnchantmentEffects,
   type TowerEnchantmentKind,
 } from '../game/towerEnchantments';
 import { resolveTowerMaintenance } from '../game/towerMaintenance';
@@ -63,10 +72,21 @@ import {
   createWaveEnemySpawn,
 } from '../game/enemySpawnFactory';
 import {
-  getEnemyWavePlan,
-  type EnemyWaveSpawn,
-} from '../game/enemyWavePlan';
+  getCampaignLevel,
+  getCampaignWavePlan,
+  type CampaignLevel,
+} from '../game/campaignLevels';
+import type { CampaignWaveSpawn } from '../game/campaignWaves';
+import {
+  getCampaignLevelId,
+  getCampaignLevelNumber,
+  type CampaignLevelId,
+} from '../game/campaignProgress';
 import { getEnemyEntryAngle } from '../game/enemyEntryAngles';
+import {
+  resolveEnemyKindKnockback,
+  type EnemyKnockbackState,
+} from '../game/enemyKnockback';
 import {
   createGameSpeed,
   cycleGameSpeed,
@@ -129,7 +149,6 @@ const WORLD_RADIUS = 5.15;
 const MAX_FOCUS_RADIUS = 0.64;
 const NAVIGATION_SPEED = 0.92;
 const ENEMY_SPAWN_INTERVAL_SECONDS = 0.72;
-const BASE_PULSE_INTERVAL_SECONDS = 1.35;
 const DEFAULT_TOWER_KIND: TowerKind = 'sector';
 
 interface ActiveSlowEffect {
@@ -137,10 +156,31 @@ interface ActiveSlowEffect {
   expiresAt: number;
 }
 
+/** One authoritative monster hit waiting for its visible effect to arrive. */
+interface PendingMonsterImpact {
+  readonly impactAt: number;
+  readonly sequence: number;
+  readonly enemyId: string;
+  readonly damage: number;
+  readonly slow?: SlowEffect;
+  readonly knockbackDistance: number;
+}
+
 type BattleResult = 'victory' | 'defeat' | null;
+
+export interface PoincareSceneOptions {
+  readonly levelId: CampaignLevelId;
+  readonly onReturnHome?: () => void;
+  readonly onCompleteLevel?: (levelId: CampaignLevelId) => void;
+  readonly onStartLevel?: (levelId: CampaignLevelId) => void;
+}
 
 export class PoincareScene {
   private readonly container: HTMLElement;
+  private readonly level: CampaignLevel;
+  private readonly returnHome: () => void;
+  private readonly completeLevel: (levelId: CampaignLevelId) => void;
+  private readonly startLevel: (levelId: CampaignLevelId) => void;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
   private readonly renderer = new THREE.WebGLRenderer({
@@ -179,21 +219,26 @@ export class PoincareScene {
   private readonly overlays: BattlefieldOverlays;
   private readonly attackSector: HyperbolicAttackSector;
   private readonly towerRangeRing: HyperbolicRangeRing;
-  private playerResources: PlayerResources = createPlayerResources();
-  private waveState: WaveState = createWaveState();
+  private playerResources: PlayerResources;
+  private waveState: WaveState;
   private waveTiming: WaveTiming = createWaveTiming();
-  private activeWavePlan: readonly EnemyWaveSpawn[] = [];
+  private activeWavePlan: readonly CampaignWaveSpawn[] = [];
   private gameSpeed: GameSpeedState = createGameSpeed();
   private readonly nextAttackAtByTower = new Map<string, number>();
   private towerAssaultClocks = new Map<string, TowerAssaultClock>();
   private readonly sectorPulses = new Map<string, SectorPulseState>();
+  private readonly sectorPulseKnockbackDistanceById = new Map<string, number>();
   private readonly slowEffects = new Map<string, ActiveSlowEffect>();
+  /** Shared enemy-side immunity, not a per-tower cooldown. */
+  private readonly knockbackStateByEnemy = new Map<string, EnemyKnockbackState>();
+  private pendingMonsterImpacts: PendingMonsterImpact[] = [];
   private simulationElapsed = 0;
   private passiveResourceRemainder = 0;
   private nextEnemySpawnAt = 0;
   private nextInitialEnemyIndex = 0;
-  private nextBasePulseAt = 0;
+  private nextBaseAttackAt = 0;
   private nextSectorPulseId = 1;
+  private nextMonsterImpactSequence = 1;
   private battleResult: BattleResult = null;
   private hoveredTile: HyperbolicTile | null = null;
   private selectedBuildTile: HyperbolicTile | null = null;
@@ -204,22 +249,31 @@ export class PoincareScene {
   private targetCameraScale = 1;
   private animationFrame = 0;
   private disposed = false;
+  private pauseMenuOpen = false;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, options: PoincareSceneOptions) {
     this.container = container;
+    this.level = getCampaignLevel(options.levelId);
+    this.returnHome = options.onReturnHome ?? (() => {});
+    this.completeLevel = options.onCompleteLevel ?? (() => {});
+    this.startLevel = options.onStartLevel ?? (() => {});
+    this.playerResources = createPlayerResources(this.level.initialResources);
+    this.waveState = createWaveState(this.level.waveCount);
     this.menus = new GameMenus({
       buildTower: this.onBuildTower,
       upgradeTower: this.onUpgradeTower,
       removeTower: this.onRemoveTower,
       upgradeTowerEnchantment: this.onUpgradeTowerEnchantment,
       upgradeBaseSkill: this.onUpgradeBaseSkill,
-    });
+    }, this.level.loadout);
     this.hud = new GameHud({
       startWave: this.onStartWave,
       cycleSpeed: this.onCycleGameSpeed,
       togglePause: this.onTogglePause,
+      resumeFromPauseMenu: this.onResumeFromPauseMenu,
       restart: this.onRestartGame,
-      continue: this.onContinueGame,
+      nextLevel: this.onNextLevel,
+      returnHome: this.onReturnHome,
     });
     this.renderer.setClearColor(0x030711, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -230,7 +284,7 @@ export class PoincareScene {
     this.renderer.domElement.tabIndex = 0;
     this.renderer.domElement.setAttribute(
       'aria-label',
-      '双曲战场。使用 WASD 移动视点，滚轮调整高度，R 键复位。',
+      '双曲战场。使用 WASD 移动视点，滚轮调整高度，R 键复位，空格暂停，Esc 打开菜单。',
     );
     this.container.append(this.renderer.domElement);
 
@@ -259,6 +313,7 @@ export class PoincareScene {
     this.hud.updateResources(this.playerResources);
     this.updateWaveHud();
     this.hud.updateSpeed(this.gameSpeed);
+    this.hud.setPauseMenu(false);
     this.hud.setResult(null);
     this.animate();
   }
@@ -290,7 +345,7 @@ export class PoincareScene {
   }
 
   private refreshBaseRangeIndicator(): void {
-    const radius = getBaseStats(this.baseProgression).areaRadius;
+    const radius = getBaseStats(this.baseProgression).targetRange;
     this.overlays.setBaseRange(this.selectedBase, radius);
   }
 
@@ -563,7 +618,11 @@ export class PoincareScene {
 
   private readonly onBuildTower = (kind: TowerKind): void => {
     const tile = this.selectedBuildTile;
-    if (!tile || this.towers.has(tile.id)) {
+    if (
+      !tile ||
+      this.towers.has(tile.id) ||
+      !this.level.loadout.towerKinds.includes(kind)
+    ) {
       return;
     }
     const payment = payForTower(this.playerResources, kind);
@@ -607,7 +666,7 @@ export class PoincareScene {
     enchantment: TowerEnchantmentKind,
   ): void => {
     const tower = this.selectedTower;
-    if (!tower) {
+    if (!tower || !this.level.loadout.enchantments.includes(enchantment)) {
       return;
     }
 
@@ -661,7 +720,10 @@ export class PoincareScene {
   }
 
   private readonly onUpgradeBaseSkill = (skill: BaseSkillId): void => {
-    if (!canUpgradeBaseSkill(this.baseProgression, skill)) {
+    if (
+      !this.level.loadout.baseSkills.includes(skill) ||
+      !canUpgradeBaseSkill(this.baseProgression, skill)
+    ) {
       return;
     }
     const payment = payForBaseSkillUpgrade(
@@ -694,7 +756,7 @@ export class PoincareScene {
       return false;
     }
     const nextWave = this.waveState.currentWave + 1;
-    const plan = getEnemyWavePlan(nextWave);
+    const plan = getCampaignWavePlan(this.level.id, nextWave);
     const nextState = startNextWave(
       this.waveState,
       plan.length,
@@ -721,7 +783,7 @@ export class PoincareScene {
   };
 
   private readonly onTogglePause = (): void => {
-    if (this.battleResult !== null) {
+    if (this.battleResult !== null || this.pauseMenuOpen) {
       return;
     }
     this.waveState = togglePause(this.waveState);
@@ -729,12 +791,48 @@ export class PoincareScene {
     this.updateWaveHud();
   };
 
-  private readonly onRestartGame = (): void => {
-    window.location.reload();
+  private openPauseMenu(): void {
+    if (this.battleResult !== null || this.pauseMenuOpen) {
+      return;
+    }
+    this.closeContextMenus();
+    if (!this.waveState.paused) {
+      this.waveState = togglePause(this.waveState);
+      this.updateWaveHud();
+    }
+    this.pressedKeys.clear();
+    this.pauseMenuOpen = true;
+    this.hud.setPauseMenu(true);
+  }
+
+  private readonly onResumeFromPauseMenu = (): void => {
+    if (!this.pauseMenuOpen) {
+      return;
+    }
+    this.pauseMenuOpen = false;
+    this.hud.setPauseMenu(false);
+    if (this.battleResult === null && this.waveState.paused) {
+      this.waveState = togglePause(this.waveState);
+      this.updateWaveHud();
+    }
+    this.pressedKeys.clear();
   };
 
-  private readonly onContinueGame = (): void => {
-    this.hud.setResult(null);
+  private readonly onRestartGame = (): void => {
+    this.startLevel(this.level.id);
+  };
+
+  private readonly onNextLevel = (): void => {
+    const nextLevel = getCampaignLevelId(
+      getCampaignLevelNumber(this.level.id) + 1,
+    );
+    if (nextLevel !== null) {
+      this.startLevel(nextLevel);
+    }
+  };
+
+  private readonly onReturnHome = (): void => {
+    this.returnHome();
   };
 
   /**
@@ -782,6 +880,9 @@ export class PoincareScene {
         return;
       }
       const stats = getTowerStats(tower.kind, tower.level);
+      const enchantmentEffects = getTowerEnchantmentEffects(
+        tower.enchantments,
+      );
       const attackIntervalSeconds = getTowerAttackIntervalSeconds(
         stats.attackIntervalSeconds,
         tower.enchantments,
@@ -813,40 +914,105 @@ export class PoincareScene {
         activeEnemies.map((enemy) => ({
           id: enemy.id,
           position: enemy.canonicalPosition,
+          health: enemy.health,
         })),
       );
       if (resolution.effects.length === 0) {
         continue;
       }
 
-      this.towerAttackEffects.emit(
-        {
-          kind: tower.kind,
-          origin: { x: tower.tile.center.x, y: tower.tile.center.y },
-          targets: resolution.effects.flatMap((effect) => {
-            const target = enemyPositions.get(effect.enemyId);
-            return target ? [target] : [];
-          }),
-          range: stats.range,
-        },
-        this.viewTransform,
-      );
+      const attackRequest: TowerAttackTimingRequest = {
+        kind: tower.kind,
+        origin: { x: tower.tile.center.x, y: tower.tile.center.y },
+        targets: resolution.effects.flatMap((effect) => {
+          const target = enemyPositions.get(effect.enemyId);
+          return target ? [target] : [];
+        }),
+        range: stats.range,
+      };
+      this.towerAttackEffects.emit(attackRequest, this.viewTransform);
 
       this.nextAttackAtByTower.set(
         tower.tile.id,
         this.simulationElapsed + attackIntervalSeconds,
       );
-      for (const effect of resolution.effects) {
-        if (effect.slow) {
-          this.applySlowEffect(effect.enemyId, effect.slow);
-        }
-        this.damageEnemy(effect.enemyId, effect.damage);
+      this.queueMonsterImpacts(
+        attackRequest,
+        resolution.effects,
+        enchantmentEffects.knockbackDistance,
+      );
+    }
+  }
+
+  /**
+   * Captures one attack's payload at fire time, but delays all state changes
+   * until the shared visual-contact clock reaches its target. A later upgrade,
+   * sale, or enchantment change cannot alter an effect already in flight.
+   */
+  private queueMonsterImpacts(
+    request: TowerAttackTimingRequest,
+    effects: readonly TowerCombatEffect[],
+    knockbackDistance: number,
+  ): void {
+    const impactDelays = getTowerAttackImpactDelays(request);
+    for (const [index, effect] of effects.entries()) {
+      const requestedDelay = impactDelays[index] ?? 0;
+      const delay = Number.isFinite(requestedDelay)
+        ? Math.max(0, requestedDelay)
+        : 0;
+      this.pendingMonsterImpacts.push({
+        impactAt: this.simulationElapsed + delay,
+        sequence: this.nextMonsterImpactSequence,
+        enemyId: effect.enemyId,
+        damage: effect.damage,
+        ...(effect.slow ? { slow: effect.slow } : {}),
+        knockbackDistance,
+      });
+      this.nextMonsterImpactSequence += 1;
+    }
+  }
+
+  /** Applies all effects whose visible contact time has been reached. */
+  private resolveDueMonsterImpacts(): void {
+    if (this.pendingMonsterImpacts.length === 0) {
+      return;
+    }
+
+    const ready: PendingMonsterImpact[] = [];
+    const remaining: PendingMonsterImpact[] = [];
+    for (const impact of this.pendingMonsterImpacts) {
+      if (impact.impactAt <= this.simulationElapsed + 1e-9) {
+        ready.push(impact);
+      } else {
+        remaining.push(impact);
       }
+    }
+    this.pendingMonsterImpacts = remaining;
+    ready.sort(
+      (left, right) =>
+        left.impactAt - right.impactAt || left.sequence - right.sequence,
+    );
+
+    for (const impact of ready) {
+      if (this.battleResult !== null) {
+        break;
+      }
+      if (impact.slow) {
+        this.applySlowEffect(impact.enemyId, impact.slow);
+      }
+      this.damageEnemy(impact.enemyId, impact.damage);
+      this.applyEnemyKnockback(
+        impact.enemyId,
+        impact.knockbackDistance,
+      );
     }
   }
 
   private emitSectorPulse(tower: PlacedTower): void {
     const stats = getTowerStats('sector', tower.level);
+    const knockbackDistance = getTowerEnchantmentEffects(
+      tower.enchantments,
+    ).knockbackDistance;
     const pulseId = `sector-pulse-${this.nextSectorPulseId}`;
     this.nextSectorPulseId += 1;
     this.sectorPulses.set(
@@ -858,6 +1024,12 @@ export class PoincareScene {
         damage: stats.damage,
       }),
     );
+    if (knockbackDistance > 0) {
+      this.sectorPulseKnockbackDistanceById.set(
+        pulseId,
+        knockbackDistance,
+      );
+    }
     this.syncSectorPulseVisuals();
   }
 
@@ -875,18 +1047,34 @@ export class PoincareScene {
       },
     }));
     const nextPulses = new Map<string, SectorPulseState>();
-    const hits: { enemyId: string; damage: number }[] = [];
+    const nextPulseKnockbackDistances = new Map<string, number>();
+    const hits: {
+      enemyId: string;
+      damage: number;
+      knockbackDistance: number;
+    }[] = [];
     for (const [pulseId, pulse] of this.sectorPulses) {
       const result = advanceSectorPulse(pulse, simulationDelta, enemies);
-      hits.push(...result.hits);
+      const knockbackDistance =
+        this.sectorPulseKnockbackDistanceById.get(pulseId) ?? 0;
+      hits.push(
+        ...result.hits.map((hit) => ({ ...hit, knockbackDistance })),
+      );
       if (!result.pulse.expired) {
         nextPulses.set(pulseId, result.pulse);
+        if (knockbackDistance > 0) {
+          nextPulseKnockbackDistances.set(pulseId, knockbackDistance);
+        }
       }
     }
 
     this.sectorPulses.clear();
+    this.sectorPulseKnockbackDistanceById.clear();
     for (const [pulseId, pulse] of nextPulses) {
       this.sectorPulses.set(pulseId, pulse);
+    }
+    for (const [pulseId, knockbackDistance] of nextPulseKnockbackDistances) {
+      this.sectorPulseKnockbackDistanceById.set(pulseId, knockbackDistance);
     }
     this.syncSectorPulseVisuals();
 
@@ -894,6 +1082,7 @@ export class PoincareScene {
     // kill/removal cannot alter another pulse's collision step.
     for (const hit of hits) {
       this.damageEnemy(hit.enemyId, hit.damage);
+      this.applyEnemyKnockback(hit.enemyId, hit.knockbackDistance);
     }
   }
 
@@ -914,30 +1103,86 @@ export class PoincareScene {
     );
   }
 
-  /** The base's area-pulse skill uses the same view-independent H² check. */
-  private resolveBasePulse(): void {
+  /** Resolves the base's high-damage single-target lock in canonical H² space. */
+  private resolveBaseAttack(): void {
     const stats = getBaseStats(this.baseProgression);
     if (
-      stats.areaDamage <= 0 ||
-      this.simulationElapsed + 1e-9 < this.nextBasePulseAt
+      stats.targetDamage <= 0 ||
+      this.simulationElapsed + 1e-9 < this.nextBaseAttackAt
     ) {
       return;
     }
 
-    const targets = this.enemies
-      .activeEnemies()
-      .filter((enemy) =>
-        isInsideBaseAttackRange(this.baseProgression, enemy.canonicalPosition),
-      );
-    if (targets.length === 0) {
+    const target = selectBaseAttackTarget(
+      this.baseProgression,
+      this.enemies.activeEnemies().map((enemy) => ({
+        id: enemy.id,
+        position: {
+          x: enemy.canonicalPosition.x,
+          y: enemy.canonicalPosition.y,
+        },
+        health: enemy.health,
+      })),
+    );
+    if (!target) {
       return;
     }
 
-    this.nextBasePulseAt =
-      this.simulationElapsed + BASE_PULSE_INTERVAL_SECONDS;
-    for (const target of targets) {
-      this.damageEnemy(target.id, stats.areaDamage);
+    this.nextBaseAttackAt =
+      this.simulationElapsed + stats.targetAttackIntervalSeconds;
+    const attackRequest: TowerAttackTimingRequest = {
+      kind: 'sniper',
+      origin: { x: 0, y: 0 },
+      targets: [target.position],
+      range: stats.targetRange,
+      style: 'base-projectile',
+    };
+    this.towerAttackEffects.emit(attackRequest, this.viewTransform);
+    this.queueMonsterImpacts(
+      attackRequest,
+      [{ enemyId: target.id, damage: stats.targetDamage }],
+      0,
+    );
+  }
+
+  /**
+   * Applies a base-centered radial knockback after a surviving target is hit.
+   * It never rewinds or reuses the current route: the movement owner discards
+   * that route and starts a fresh behavior-compatible route at the displaced
+   * canonical point. The shared enemy cooldown still makes the first
+   * same-frame hit win.
+   */
+  private applyEnemyKnockback(
+    enemyId: string,
+    requestedDistance: number,
+  ): void {
+    if (!Number.isFinite(requestedDistance) || requestedDistance <= 0) {
+      return;
     }
+    const enemy = this.enemies.get(enemyId);
+    if (!enemy) {
+      return;
+    }
+
+    const resolution = resolveEnemyKindKnockback(enemy.kind, {
+      position: enemy.canonicalPosition,
+      requestedDistance,
+      now: this.simulationElapsed,
+      state: this.knockbackStateByEnemy.get(enemy.id),
+    });
+    if (!resolution.applied) {
+      return;
+    }
+
+    const moved = this.enemies.rerouteFromPosition(
+      enemy,
+      resolution.position,
+      this.viewTransform,
+    );
+    if (!moved) {
+      return;
+    }
+    this.knockbackStateByEnemy.set(enemy.id, resolution.state);
   }
 
   private applySlowEffect(
@@ -1113,6 +1358,7 @@ export class PoincareScene {
       return;
     }
     this.slowEffects.delete(enemy.id);
+    this.knockbackStateByEnemy.delete(enemy.id);
     this.towerAssaultClocks.delete(enemy.id);
     this.grantResources(enemy.reward);
     this.resolveWaveEnemy();
@@ -1219,16 +1465,29 @@ export class PoincareScene {
       return;
     }
     this.battleResult = result;
+    if (result === 'victory') {
+      this.completeLevel(this.level.id);
+    }
+    this.pauseMenuOpen = false;
+    this.hud.setPauseMenu(false);
     this.pressedKeys.clear();
     this.waveTiming = clearWaveTiming(this.waveTiming);
     this.sectorPulses.clear();
+    this.sectorPulseKnockbackDistanceById.clear();
     this.sectorPulseVisuals.clear();
+    this.knockbackStateByEnemy.clear();
+    this.pendingMonsterImpacts = [];
     this.towerAssaultClocks.clear();
     if (result === 'defeat') {
       this.waveState = { ...this.waveState, paused: true };
     }
     this.updateWaveHud();
-    this.hud.setResult(result);
+    this.hud.setResult(
+      result,
+      result === 'victory' &&
+        getCampaignLevelId(getCampaignLevelNumber(this.level.id) + 1) !==
+          null,
+    );
   }
 
   private simulateBattle(simulationDelta: number): void {
@@ -1248,10 +1507,20 @@ export class PoincareScene {
     // Income applies throughout an unpaused, unfinished game, including the
     // fixed countdown before the first wave and between later waves.
     this.accruePassiveResources(simulationDelta);
+    this.resolveDueMonsterImpacts();
+    if (this.battleResult !== null) {
+      return;
+    }
     this.spawnWaveEnemies();
     this.resolveTowerAttacks();
     this.advanceSectorPulses(simulationDelta);
-    this.resolveBasePulse();
+    this.resolveBaseAttack();
+    // Field effects can have an immediate contact at their source radius; the
+    // second pass resolves those without waiting for another simulation frame.
+    this.resolveDueMonsterImpacts();
+    if (this.battleResult !== null) {
+      return;
+    }
 
     const speedMultipliers = this.getActiveSpeedMultipliers();
     this.resolveTowerAssaults(speedMultipliers);
@@ -1263,6 +1532,7 @@ export class PoincareScene {
     );
     for (const enemy of reachedEnemies) {
       this.slowEffects.delete(enemy.id);
+      this.knockbackStateByEnemy.delete(enemy.id);
       this.towerAssaultClocks.delete(enemy.id);
       this.applyBaseDamage(enemy.contactDamage);
       this.resolveWaveEnemy();
@@ -1312,15 +1582,38 @@ export class PoincareScene {
   }
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (event.code === 'Space') {
+      event.preventDefault();
+      if (!event.repeat) {
+        if (this.pauseMenuOpen) {
+          this.onResumeFromPauseMenu();
+        } else {
+          this.onTogglePause();
+        }
+      }
+      return;
+    }
+
     const key = event.key.toLowerCase();
+    if (key === 'escape') {
+      event.preventDefault();
+      if (!event.repeat) {
+        if (this.pauseMenuOpen) {
+          this.onResumeFromPauseMenu();
+        } else {
+          this.openPauseMenu();
+        }
+      }
+      return;
+    }
+    if (this.pauseMenuOpen) {
+      return;
+    }
     if (['w', 'a', 's', 'd'].includes(key)) {
       this.pressedKeys.add(key);
     }
     if (key === 'r' && !event.repeat) {
       this.resetView();
-    }
-    if (key === 'escape') {
-      this.closeContextMenus();
     }
   };
 
@@ -1580,7 +1873,10 @@ export class PoincareScene {
     }
     this.overlays.animate(elapsed);
     this.towers.update(this.viewTransform, elapsed);
-    this.towerAttackEffects.update(deltaTime, this.viewTransform);
+    this.towerAttackEffects.update(
+      isSimulating ? simulationDelta : 0,
+      this.viewTransform,
+    );
     this.sectorPulseVisuals.update(this.viewTransform);
     this.updateContextMenuPositions();
     this.refreshTowerPreview();

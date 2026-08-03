@@ -1,10 +1,8 @@
-export const TOTAL_WAVES = 20;
-
 export type WavePhase = 'pending' | 'active' | 'complete' | 'victory';
 
 export interface WaveState {
   currentWave: number;
-  totalWaves: typeof TOTAL_WAVES;
+  totalWaves: number;
   phase: WavePhase;
   plannedEnemies: number;
   spawnedEnemies: number;
@@ -12,10 +10,21 @@ export interface WaveState {
   paused: boolean;
 }
 
-export function createWaveState(): WaveState {
+function assertTotalWaves(totalWaves: number): void {
+  if (!Number.isSafeInteger(totalWaves) || totalWaves <= 0) {
+    throw new RangeError('totalWaves must be a positive safe integer.');
+  }
+}
+
+/**
+ * Starts a level-specific wave tracker. Every campaign level owns its own
+ * authored wave count; there is no global survival-mode fallback.
+ */
+export function createWaveState(totalWaves: number): WaveState {
+  assertTotalWaves(totalWaves);
   return {
     currentWave: 0,
-    totalWaves: TOTAL_WAVES,
+    totalWaves,
     phase: 'pending',
     plannedEnemies: 0,
     spawnedEnemies: 0,
@@ -59,7 +68,7 @@ export function canStartNextWave(state: WaveState): boolean {
   );
 }
 
-/** Starts one of the twenty waves. The caller owns the enemy-count curve. */
+/** Starts the next authored wave. The caller owns the enemy-count curve. */
 export function startNextWave(
   state: WaveState,
   plannedEnemies: number,

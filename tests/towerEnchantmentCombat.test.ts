@@ -19,6 +19,7 @@ const NO_ENCHANTMENTS: TowerEnchantmentLevels = {
   allyHeal: 0,
   attackSpeed: 0,
   fortify: 0,
+  knockback: 0,
 };
 
 function levels(

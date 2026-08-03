@@ -8,8 +8,13 @@ import {
   IDENTITY_MOBIUS,
   applyMobius,
   hyperbolicDistance,
+  hyperbolicRadiusToPoincare,
   translationToOrigin,
 } from '../src/math/hyperbolic';
+import {
+  buildEnemyRoute,
+  sampleEnemyRoute,
+} from '../src/game/enemyRoutes';
 
 describe('enemy manager', () => {
   it('spawns at the requested H2 radius and progresses along its route geodesic', () => {
@@ -71,6 +76,69 @@ describe('enemy manager', () => {
       3.6,
       9,
     );
+    enemies.dispose();
+  });
+
+  it('discards an enemy route and starts a newly generated route at its displaced position', () => {
+    const scene = new THREE.Scene();
+    const enemies = new EnemyManager(scene, 5, {
+      startRadius: 4,
+      speed: 1,
+    });
+    const originalRoute = buildEnemyRoute({
+      entryAngle: 0.35,
+      startRadius: 4,
+      behavior: 'zigzag',
+      seed: 71,
+    });
+    const enemy = enemies.spawn({
+      id: 'rerouted',
+      route: originalRoute,
+    });
+    enemies.update(0.8, IDENTITY_MOBIUS);
+
+    const targetAngle = -0.92;
+    const targetRadius = 3.2;
+    const targetDiskRadius = hyperbolicRadiusToPoincare(targetRadius);
+    const target = {
+      x: targetDiskRadius * Math.cos(targetAngle),
+      y: targetDiskRadius * Math.sin(targetAngle),
+    };
+    const originalSpeed = enemy.speed;
+    const rerouted = enemies.rerouteFromPosition(
+      enemy,
+      target,
+      IDENTITY_MOBIUS,
+    );
+
+    expect(rerouted).toBe(enemy);
+    expect(enemy.route).not.toBe(originalRoute);
+    expect(enemy.route.behavior).toBe('zigzag');
+    expect(enemy.route.seed).toBe(71);
+    expect(enemy.routeAngle).toBeCloseTo(targetAngle, 9);
+    expect(enemy.startRadius).toBeCloseTo(targetRadius, 9);
+    expect(enemy.travelledDistance).toBe(0);
+    expect(enemy.canonicalPosition.x).toBeCloseTo(target.x, 9);
+    expect(enemy.canonicalPosition.y).toBeCloseTo(target.y, 9);
+    const routeStart = sampleEnemyRoute(enemy.route, 0);
+    expect(routeStart.x).toBeCloseTo(target.x, 9);
+    expect(routeStart.y).toBeCloseTo(target.y, 9);
+
+    const newRoute = enemy.route;
+    const expectedAfterMove = sampleEnemyRoute(newRoute, originalSpeed * 0.4);
+    enemies.update(0.4, IDENTITY_MOBIUS);
+    expect(enemy.speed).toBe(originalSpeed);
+    expect(enemy.travelledDistance).toBeCloseTo(originalSpeed * 0.4, 9);
+    expect(enemy.canonicalPosition.x).toBeCloseTo(expectedAfterMove.x, 9);
+    expect(enemy.canonicalPosition.y).toBeCloseTo(expectedAfterMove.y, 9);
+
+    expect(() =>
+      enemies.rerouteFromPosition(enemy, { x: 0, y: 0 }, IDENTITY_MOBIUS),
+    ).toThrow(RangeError);
+    expect(() =>
+      enemies.rerouteFromPosition(enemy, { x: 1, y: 0 }, IDENTITY_MOBIUS),
+    ).toThrow(RangeError);
+    expect(enemy.route).toBe(newRoute);
     enemies.dispose();
   });
 

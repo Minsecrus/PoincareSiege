@@ -50,6 +50,7 @@ describe('tower catalog stats', () => {
       'pulse',
       'anchor',
       'arc',
+      'sniper',
     ] satisfies readonly TowerKind[]);
 
     for (const kind of TOWER_KINDS) {
@@ -81,6 +82,7 @@ describe('tower catalog stats', () => {
     const pulse = getTowerStats('pulse', 1);
     const anchor = getTowerStats('anchor', 1);
     const arc = getTowerStats('arc', 1);
+    const sniper = getTowerStats('sniper', 1);
 
     expect(sector).toMatchObject({
       attackMode: 'sector',
@@ -105,6 +107,12 @@ describe('tower catalog stats', () => {
       chainCount: 3,
       chainRange: 0.85,
       chainDamageMultiplier: 0.8,
+    });
+    expect(sniper).toMatchObject({
+      attackMode: 'single-target',
+      maxHealth: 130,
+      damage: 115,
+      range: 3.2,
     });
   });
 

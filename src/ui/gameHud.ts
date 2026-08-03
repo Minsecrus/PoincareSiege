@@ -16,8 +16,10 @@ interface GameHudActions {
   startWave: () => void;
   cycleSpeed: () => void;
   togglePause: () => void;
+  resumeFromPauseMenu: () => void;
   restart: () => void;
-  continue: () => void;
+  nextLevel: () => void;
+  returnHome: () => void;
 }
 
 function requireElement<T extends Element>(selector: string): T {
@@ -64,14 +66,24 @@ export class GameHud {
     requireElement<HTMLElement>('#hud-resource-value');
   private readonly pauseButton =
     requireElement<HTMLButtonElement>('#pause-game');
+  private readonly pauseOverlay =
+    requireElement<HTMLDivElement>('#game-pause-overlay');
+  private readonly resumeButton =
+    requireElement<HTMLButtonElement>('#resume-game');
+  private readonly pauseRestartButton =
+    requireElement<HTMLButtonElement>('#pause-restart-game');
+  private readonly returnHomeButton =
+    requireElement<HTMLButtonElement>('#return-home');
   private readonly resultOverlay =
     requireElement<HTMLDivElement>('#game-result-overlay');
   private readonly resultCard =
     requireElement<HTMLDivElement>('#game-result-card');
   private readonly restartButton =
     requireElement<HTMLButtonElement>('#restart-game');
-  private readonly continueButton =
-    requireElement<HTMLButtonElement>('#continue-game');
+  private readonly nextLevelButton =
+    requireElement<HTMLButtonElement>('#next-level');
+  private readonly resultReturnHomeButton =
+    requireElement<HTMLButtonElement>('#result-return-home');
   private readonly hoverBuildCost =
     requireElement<HTMLDivElement>('#hover-build-cost');
   private readonly hoverBuildCostValue =
@@ -83,8 +95,12 @@ export class GameHud {
     this.startWaveButton.addEventListener('click', this.onStartWave);
     this.speedButton.addEventListener('click', this.onCycleSpeed);
     this.pauseButton.addEventListener('click', this.onTogglePause);
+    this.resumeButton.addEventListener('click', this.onResumeFromPauseMenu);
+    this.pauseRestartButton.addEventListener('click', this.onRestart);
+    this.returnHomeButton.addEventListener('click', this.onReturnHome);
     this.restartButton.addEventListener('click', this.onRestart);
-    this.continueButton.addEventListener('click', this.onContinue);
+    this.nextLevelButton.addEventListener('click', this.onNextLevel);
+    this.resultReturnHomeButton.addEventListener('click', this.onReturnHome);
   }
 
   updateBase(progression: BaseProgression): void {
@@ -146,10 +162,19 @@ export class GameHud {
     );
   }
 
-  setResult(result: GameResult): void {
+  setResult(result: GameResult, canStartNextLevel = false): void {
     this.resultOverlay.hidden = result === null;
     if (result !== null) {
       this.resultCard.dataset.result = result;
+    }
+    this.nextLevelButton.hidden =
+      result !== 'victory' || !canStartNextLevel;
+  }
+
+  setPauseMenu(open: boolean): void {
+    this.pauseOverlay.hidden = !open;
+    if (open) {
+      this.resumeButton.focus({ preventScroll: true });
     }
   }
 
@@ -171,8 +196,12 @@ export class GameHud {
     this.startWaveButton.removeEventListener('click', this.onStartWave);
     this.speedButton.removeEventListener('click', this.onCycleSpeed);
     this.pauseButton.removeEventListener('click', this.onTogglePause);
+    this.resumeButton.removeEventListener('click', this.onResumeFromPauseMenu);
+    this.pauseRestartButton.removeEventListener('click', this.onRestart);
+    this.returnHomeButton.removeEventListener('click', this.onReturnHome);
     this.restartButton.removeEventListener('click', this.onRestart);
-    this.continueButton.removeEventListener('click', this.onContinue);
+    this.nextLevelButton.removeEventListener('click', this.onNextLevel);
+    this.resultReturnHomeButton.removeEventListener('click', this.onReturnHome);
   }
 
   private readonly onStartWave = (): void => {
@@ -187,11 +216,20 @@ export class GameHud {
     this.actions.togglePause();
   };
 
+  private readonly onResumeFromPauseMenu = (): void => {
+    this.actions.resumeFromPauseMenu();
+  };
+
   private readonly onRestart = (): void => {
     this.actions.restart();
   };
 
-  private readonly onContinue = (): void => {
-    this.actions.continue();
+  private readonly onNextLevel = (): void => {
+    this.actions.nextLevel();
   };
+
+  private readonly onReturnHome = (): void => {
+    this.actions.returnHome();
+  };
+
 }

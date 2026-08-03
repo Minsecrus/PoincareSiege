@@ -12,7 +12,9 @@
   </head>
   <body>
     <main id="app">
-      <div id="scene" aria-label="Poincaré Siege 双曲战场"></div>
+      <div id="home-screen"></div>
+      <div id="game-shell" hidden>
+        <div id="scene" aria-label="Poincaré Siege 双曲战场"></div>
       <div id="game-hud" class="game-hud" aria-label="游戏状态">
         <div class="hud-base" aria-label="基地生命">
           <svg
@@ -96,8 +98,52 @@
             type="button"
             aria-label="暂停游戏"
           >
-            <svg viewBox="0 0 48 48" aria-hidden="true">
+            <svg class="hud-pause-icon" viewBox="0 0 48 48" aria-hidden="true">
               <path d="M13 9h8v30h-8V9Zm14 0h8v30h-8V9Z" />
+            </svg>
+            <svg class="hud-play-icon" viewBox="0 0 48 48" aria-hidden="true">
+              <path d="m14 9 23 15-23 15V9Z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div
+        id="game-pause-overlay"
+        class="game-pause-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="游戏暂停"
+        hidden
+      >
+        <div class="game-pause-card">
+          <button
+            id="resume-game"
+            class="pause-action pause-action--resume"
+            type="button"
+            aria-label="继续游戏"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="m13 10 22 14-22 14V10Z" />
+            </svg>
+          </button>
+          <button
+            id="pause-restart-game"
+            class="pause-action"
+            type="button"
+            aria-label="重新开始"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M39 17V7l-5 5A18 18 0 1 0 41 29h-7a11 11 0 1 1-3-12l-5 5h13Z" />
+            </svg>
+          </button>
+          <button
+            id="return-home"
+            class="pause-action"
+            type="button"
+            aria-label="回到主页"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="m24 5 19 16v20H29V29H19v12H5V21L24 5Zm0 8L12 23v12h2v-12h20v12h3V23L24 13Z" />
             </svg>
           </button>
         </div>
@@ -123,6 +169,16 @@
           </div>
           <div class="game-result-actions">
             <button
+              id="next-level"
+              class="result-action result-action--next"
+              type="button"
+              aria-label="下一关"
+            >
+              <svg viewBox="0 0 48 48" aria-hidden="true">
+                <path d="m8 11 15 13L8 37v-8l6-5-6-5v-8Zm15 0 15 13-15 13v-8l6-5-6-5v-8Z" />
+              </svg>
+            </button>
+            <button
               id="restart-game"
               class="result-action"
               type="button"
@@ -133,13 +189,13 @@
               </svg>
             </button>
             <button
-              id="continue-game"
-              class="result-action result-action--continue"
+              id="result-return-home"
+              class="result-action result-action--home"
               type="button"
-              aria-label="继续"
+              aria-label="回到主页"
             >
               <svg viewBox="0 0 48 48" aria-hidden="true">
-                <path d="m13 10 22 14-22 14V10Z" />
+                <path d="m24 5 19 16v20H29V29H19v12H5V21L24 5Zm0 8L12 23v12h2v-12h20v12h3V23L24 13Z" />
               </svg>
             </button>
           </div>
@@ -249,6 +305,26 @@
           </span>
           <span class="cost-badge" aria-hidden="true">
             <span class="coin-dot"></span><span data-tower-build-cost>170</span>
+          </span>
+        </button>
+        <button
+          id="build-sniper-tower"
+          class="build-option"
+          type="button"
+          role="menuitem"
+          data-tower-kind="sniper"
+          data-build-cost="240"
+          aria-label="建造湮灭狙击塔，费用 240"
+        >
+          <span class="build-option__icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M5 21h25v-5h6v5h7v6h-7v5h-6v-5H5v-6Z" />
+              <path d="M10 27h8v12h-5v-7h-3v-5Zm19 0h5l4 12h-5l-2-6-2 6h-5l5-12Z" />
+              <path d="M38 4h4v7h-4zM38 15h4v7h-4zM29 11h7v4h-7zM44 11h-7v4h7z" />
+            </svg>
+          </span>
+          <span class="cost-badge" aria-hidden="true">
+            <span class="coin-dot"></span><span data-tower-build-cost>240</span>
           </span>
         </button>
       </div>
@@ -394,6 +470,28 @@
               <i></i><i></i><i></i><i></i><i></i>
             </span>
           </button>
+          <button
+            class="enchantment-option enchantment-option--knockback"
+            type="button"
+            role="menuitem"
+            data-tower-enchantment="knockback"
+            aria-label="升级击退，击退抗性期间无效"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M5 24 22 7v10h18v14H22v10L5 24Z" />
+              <path d="M42 10h3v28h-3zM34 15h3v18h-3z" />
+            </svg>
+            <span class="enchantment-cost" aria-hidden="true">
+              <span class="coin-dot"></span><span data-tower-enchantment-cost>80</span>
+            </span>
+            <span
+              class="enchantment-level"
+              data-tower-enchantment-level
+              aria-hidden="true"
+            >
+              <i></i><i></i><i></i><i></i><i></i>
+            </span>
+          </button>
         </div>
         <div class="tower-actions">
           <button
@@ -452,12 +550,6 @@
             ><i class="is-active"></i><i class="is-active"></i
             ><i class="is-active"></i><i class="is-active"></i>
           </div>
-          <span class="skill-points" aria-label="技能点">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m12 2 3 6 7 .9-5 4.8 1.3 6.8L12 17.2l-6.3 3.3L7 13.7 2 8.9 9 8l3-6Z" />
-            </svg>
-            <span id="base-skill-points">3</span>
-          </span>
         </div>
         <div id="base-skills" class="base-skills">
           <button
@@ -476,7 +568,7 @@
               ><span data-base-skill-cost>80</span>
             </span>
             <span class="skill-level" data-base-skill-level aria-hidden="true">
-              <i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i>
             </span>
           </button>
           <button
@@ -494,17 +586,18 @@
               ><span data-base-skill-cost>80</span>
             </span>
             <span class="skill-level" data-base-skill-level aria-hidden="true">
-              <i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i>
             </span>
           </button>
           <button
             class="base-skill"
             type="button"
             data-base-skill="areaPulse"
-            aria-label="升级基地范围攻击"
+            aria-label="升级基地单体锁定攻击"
           >
             <svg viewBox="0 0 48 48" aria-hidden="true">
-              <path fill-rule="evenodd" d="M24 4a20 20 0 1 1 0 40 20 20 0 0 1 0-40Zm0 7a13 13 0 1 0 0 26 13 13 0 0 0 0-26Zm0 7a6 6 0 1 0 0 12 6 6 0 0 0 0-12Z" />
+              <path fill-rule="evenodd" d="M24 5a19 19 0 1 1 0 38 19 19 0 0 1 0-38Zm0 6a13 13 0 1 0 0 26 13 13 0 0 0 0-26Zm0 7a6 6 0 1 0 0 12 6 6 0 0 0 0-12Z" />
+              <path d="M22 0h4v10h-4zM22 38h4v10h-4zM0 22h10v4H0zM38 22h10v4H38z" />
             </svg>
             <span id="base-area" class="skill-value">—</span>
             <span class="base-skill-cost" aria-hidden="true">
@@ -512,10 +605,11 @@
               ><span data-base-skill-cost>80</span>
             </span>
             <span class="skill-level" data-base-skill-level aria-hidden="true">
-              <i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i>
             </span>
           </button>
         </div>
+      </div>
       </div>
     </main>
     <script type="module" src="/src/main.ts"></script>

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  TOTAL_WAVES,
   addActiveReinforcements,
   canSpawnEnemy,
   canStartNextWave,
@@ -14,22 +13,31 @@ import {
   togglePause,
 } from '../src/game/waveState';
 
+const TEST_WAVE_COUNT = 4;
+const createTestWaveState = () => createWaveState(TEST_WAVE_COUNT);
+
 describe('wave state', () => {
-  it('starts before wave one with twenty waves available', () => {
-    expect(createWaveState()).toEqual({
+  it('starts before wave one with its explicit level wave count', () => {
+    expect(createTestWaveState()).toEqual({
       currentWave: 0,
-      totalWaves: TOTAL_WAVES,
+      totalWaves: TEST_WAVE_COUNT,
       phase: 'pending',
       plannedEnemies: 0,
       spawnedEnemies: 0,
       remainingEnemies: 0,
       paused: false,
     });
-    expect(canStartNextWave(createWaveState())).toBe(true);
+    expect(canStartNextWave(createTestWaveState())).toBe(true);
+  });
+
+  it('accepts a level-specific positive wave count and rejects invalid values', () => {
+    expect(createWaveState(3).totalWaves).toBe(3);
+    expect(() => createWaveState(0)).toThrow(RangeError);
+    expect(() => createWaveState(2.5)).toThrow(RangeError);
   });
 
   it('starts a wave and accounts for each spawned enemy', () => {
-    const active = startNextWave(createWaveState(), 3);
+    const active = startNextWave(createTestWaveState(), 3);
     expect(active).toMatchObject({
       currentWave: 1,
       phase: 'active',
@@ -44,7 +52,7 @@ describe('wave state', () => {
   });
 
   it('does not spawn more enemies than the wave contains', () => {
-    let state = startNextWave(createWaveState(), 1);
+    let state = startNextWave(createTestWaveState(), 1);
     state = spawnEnemy(state);
 
     expect(canSpawnEnemy(state)).toBe(false);
@@ -52,7 +60,7 @@ describe('wave state', () => {
   });
 
   it('adds already-active reinforcements without changing the unsent count', () => {
-    let state = startNextWave(createWaveState(), 4);
+    let state = startNextWave(createTestWaveState(), 4);
     state = spawnEnemy(state);
     state = spawnEnemy(state);
     state = defeatEnemy(state);
@@ -78,7 +86,7 @@ describe('wave state', () => {
   });
 
   it('does not turn already-active reinforcements into future scheduled spawns', () => {
-    const fullySpawned = spawnEnemy(startNextWave(createWaveState(), 1));
+    const fullySpawned = spawnEnemy(startNextWave(createTestWaveState(), 1));
     const reinforced = addActiveReinforcements(fullySpawned, 2);
 
     expect(reinforced).toMatchObject({
@@ -90,7 +98,7 @@ describe('wave state', () => {
   });
 
   it('rejects invalid reinforcement quantities and malformed active counters', () => {
-    const active = spawnEnemy(startNextWave(createWaveState(), 2));
+    const active = spawnEnemy(startNextWave(createTestWaveState(), 2));
     for (const count of [
       0,
       -1,
@@ -119,12 +127,12 @@ describe('wave state', () => {
   });
 
   it('does not mutate pending, paused, complete, or victory states with reinforcements', () => {
-    const pending = createWaveState();
-    const paused = togglePause(startNextWave(createWaveState(), 1));
-    const complete = defeatEnemy(spawnEnemy(startNextWave(createWaveState(), 1)));
+    const pending = createTestWaveState();
+    const paused = togglePause(startNextWave(createTestWaveState(), 1));
+    const complete = defeatEnemy(spawnEnemy(startNextWave(createTestWaveState(), 1)));
 
-    let victory = createWaveState();
-    for (let wave = 1; wave <= TOTAL_WAVES; wave += 1) {
+    let victory = createTestWaveState();
+    for (let wave = 1; wave <= TEST_WAVE_COUNT; wave += 1) {
       victory = defeatEnemy(spawnEnemy(startNextWave(victory, 1)));
     }
 
@@ -136,7 +144,7 @@ describe('wave state', () => {
   });
 
   it('only completes once every enemy has spawned and then been defeated', () => {
-    let state = startNextWave(createWaveState(), 2);
+    let state = startNextWave(createTestWaveState(), 2);
     state = spawnEnemy(state);
     state = defeatEnemy(state);
     expect(state.phase).toBe('active');
@@ -150,13 +158,13 @@ describe('wave state', () => {
   });
 
   it('does not force completion while enemies are still alive', () => {
-    const active = spawnEnemy(startNextWave(createWaveState(), 1));
+    const active = spawnEnemy(startNextWave(createTestWaveState(), 1));
 
     expect(completeWave(active)).toBe(active);
   });
 
   it('allows the next wave only after an intermission', () => {
-    let state = startNextWave(createWaveState(), 1);
+    let state = startNextWave(createTestWaveState(), 1);
     expect(startNextWave(state, 2)).toBe(state);
 
     state = defeatEnemy(spawnEnemy(state));
@@ -165,7 +173,7 @@ describe('wave state', () => {
   });
 
   it('toggles pause and prevents simulation transitions while paused', () => {
-    const active = startNextWave(createWaveState(), 1);
+    const active = startNextWave(createTestWaveState(), 1);
     const paused = togglePause(active);
 
     expect(paused.paused).toBe(true);
@@ -174,16 +182,16 @@ describe('wave state', () => {
     expect(togglePause(paused).paused).toBe(false);
   });
 
-  it('reaches victory after the twentieth completed wave and cannot restart', () => {
-    let state = createWaveState();
-    for (let wave = 1; wave <= TOTAL_WAVES; wave += 1) {
+  it('reaches victory after the level-specific final wave and cannot restart', () => {
+    let state = createWaveState(3);
+    for (let wave = 1; wave <= 3; wave += 1) {
       state = startNextWave(state, 1);
       state = spawnEnemy(state);
       state = defeatEnemy(state);
     }
 
     expect(state).toMatchObject({
-      currentWave: TOTAL_WAVES,
+      currentWave: 3,
       phase: 'victory',
       paused: false,
     });

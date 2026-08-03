@@ -11,7 +11,8 @@ export type TowerAttackMode =
   | 'geodesic-beam'
   | 'pulse'
   | 'slow-field'
-  | 'chain-arc';
+  | 'chain-arc'
+  | 'single-target';
 
 /** Values shared by every tower family. `range` is always an H² distance. */
 export interface TowerStatsBase<
@@ -72,12 +73,17 @@ export interface ArcTowerStats extends TowerStatsBase<'arc', 'chain-arc'> {
   chainDamageMultiplier: number;
 }
 
+/** A long-range specialist that can damage exactly one enemy per shot. */
+export interface SniperTowerStats
+  extends TowerStatsBase<'sniper', 'single-target'> {}
+
 export interface TowerStatsByKind {
   sector: SectorTowerStats;
   prism: PrismTowerStats;
   pulse: PulseTowerStats;
   anchor: AnchorTowerStats;
   arc: ArcTowerStats;
+  sniper: SniperTowerStats;
 }
 
 export type TowerStats = TowerStatsByKind[TowerKind];
@@ -275,6 +281,36 @@ const ARC_STATS_BY_LEVEL: readonly ArcTowerStats[] = [
   },
 ];
 
+const SNIPER_STATS_BY_LEVEL: readonly SniperTowerStats[] = [
+  {
+    kind: 'sniper',
+    level: 1,
+    maxHealth: 130,
+    damage: 115,
+    range: 3.2,
+    attackMode: 'single-target',
+    attackIntervalSeconds: 0.85,
+  },
+  {
+    kind: 'sniper',
+    level: 2,
+    maxHealth: 180,
+    damage: 185,
+    range: 3.65,
+    attackMode: 'single-target',
+    attackIntervalSeconds: 0.7,
+  },
+  {
+    kind: 'sniper',
+    level: 3,
+    maxHealth: 240,
+    damage: 290,
+    range: 4.1,
+    attackMode: 'single-target',
+    attackIntervalSeconds: 0.56,
+  },
+];
+
 const STATS_BY_KIND: {
   readonly [Kind in TowerKind]: readonly TowerStatsForKind<Kind>[];
 } = {
@@ -283,6 +319,7 @@ const STATS_BY_KIND: {
   pulse: PULSE_STATS_BY_LEVEL,
   anchor: ANCHOR_STATS_BY_LEVEL,
   arc: ARC_STATS_BY_LEVEL,
+  sniper: SNIPER_STATS_BY_LEVEL,
 };
 
 function normalizeTowerLevel(level: number): number {

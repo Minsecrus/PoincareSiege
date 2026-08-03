@@ -7,6 +7,7 @@ export const TOWER_KINDS = [
   'pulse',
   'anchor',
   'arc',
+  'sniper',
 ] as const;
 
 export type TowerKind = (typeof TOWER_KINDS)[number];
@@ -43,9 +44,15 @@ const TOWER_ECONOMY_BY_KIND: Record<TowerKind, TowerEconomy> = {
     buildCost: 170,
     upgradeCosts: [140, 210],
   },
+  // A deliberately expensive specialist: it trades survivability and area
+  // coverage for reliable single-target damage against priority enemies.
+  sniper: {
+    buildCost: 240,
+    upgradeCosts: [190, 300],
+  },
 };
 
-const BASE_SKILL_UPGRADE_COST_BY_LEVEL = [80, 140, 220] as const;
+const BASE_SKILL_UPGRADE_COST_BY_LEVEL = [80, 140, 220, 320, 440] as const;
 const SELL_REFUND_RATE = 0.5;
 
 /** Compatibility constant for callers that only know the sector tower. */

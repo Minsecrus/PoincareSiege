@@ -12,6 +12,7 @@ import {
 import {
   IDENTITY_MOBIUS,
   applyMobius,
+  hyperbolicDistance,
   mobiusDerivativeAngle,
   vec2LengthSquared,
   type MobiusTransform,
@@ -34,6 +35,7 @@ export const ENEMY_VISUAL_KINDS = ENEMY_KINDS;
 export type EnemyVisualKind = EnemyKind;
 
 const ARRIVAL_EPSILON = 1e-8;
+const REROUTE_CENTER_EPSILON = 1e-12;
 const HEALTH_PIP_COUNT = 6;
 const ENEMY_VISUAL_SCALE = 2;
 
@@ -99,7 +101,11 @@ export interface HyperbolicEnemy {
   readonly group: THREE.Group;
 }
 
-interface EnemyRecord extends HyperbolicEnemy {
+interface EnemyRecord
+  extends Omit<HyperbolicEnemy, 'routeAngle' | 'route' | 'startRadius'> {
+  routeAngle: number;
+  route: EnemyRoute;
+  startRadius: number;
   readonly visualScale: number;
   readonly healthPips: readonly THREE.Mesh<
     THREE.BoxGeometry,
@@ -176,6 +182,22 @@ function assertPositiveFinite(value: number, label: string): void {
 function assertNonNegativeFinite(value: number, label: string): void {
   if (!Number.isFinite(value) || value < 0) {
     throw new RangeError(`${label} must be a non-negative finite number.`);
+  }
+}
+
+function assertReroutePosition(point: Vec2): void {
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+    throw new RangeError('canonicalPosition must use finite coordinates.');
+  }
+
+  const radiusSquared = vec2LengthSquared(point);
+  if (radiusSquared >= 1) {
+    throw new RangeError(
+      'canonicalPosition must be strictly inside the Poincare disk.',
+    );
+  }
+  if (radiusSquared <= REROUTE_CENTER_EPSILON) {
+    throw new RangeError('canonicalPosition cannot be the base center.');
   }
 }
 
@@ -877,6 +899,39 @@ export class EnemyManager {
       this.onReachCenter?.(enemy);
     }
     return reached;
+  }
+
+  /**
+   * Discards an active enemy's previous path and starts a newly generated
+   * route from a canonical disk position. The new path keeps the enemy's
+   * movement behavior and deterministic variation, but is otherwise wholly
+   * independent of the route it was following before the displacement.
+   */
+  rerouteFromPosition(
+    enemyOrId: HyperbolicEnemy | string,
+    canonicalPosition: Vec2,
+    viewTransform: MobiusTransform = IDENTITY_MOBIUS,
+  ): HyperbolicEnemy | null {
+    assertReroutePosition(canonicalPosition);
+
+    const enemy = this.resolveEnemy(enemyOrId);
+    if (!enemy) {
+      return null;
+    }
+
+    const route = buildEnemyRoute({
+      behavior: enemy.route.behavior,
+      seed: enemy.route.seed,
+      entryAngle: Math.atan2(canonicalPosition.y, canonicalPosition.x),
+      startRadius: hyperbolicDistance(canonicalPosition, { x: 0, y: 0 }),
+    });
+    enemy.route = route;
+    enemy.routeAngle = route.entryAngle;
+    enemy.startRadius = route.startRadius;
+    enemy.travelledDistance = 0;
+    this.updateCanonicalPosition(enemy);
+    this.updateVisual(enemy, viewTransform);
+    return enemy;
   }
 
   /** Removes an enemy without treating it as an arrival at the base. */

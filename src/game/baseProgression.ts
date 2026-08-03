@@ -15,7 +15,6 @@ export interface BaseSkillLevels {
 }
 
 export interface BaseProgression {
-  skillPoints: number;
   health: number;
   skills: BaseSkillLevels;
 }
@@ -23,11 +22,22 @@ export interface BaseProgression {
 export interface BaseStats {
   maxHealth: number;
   regenerationPerSecond: number;
-  areaDamage: number;
-  areaRadius: number;
+  /** Damage dealt to exactly one target for one base attack. */
+  targetDamage: number;
+  /** Targeting radius in H² distance units. */
+  targetRange: number;
+  /** Seconds between single-target attacks. Zero means the skill is unlearned. */
+  targetAttackIntervalSeconds: number;
 }
 
-export const MAX_BASE_SKILL_LEVEL = 3;
+/** Canonical enemy data eligible for the base's single-target lock. */
+export interface BaseAttackTarget {
+  readonly id: string;
+  readonly position: Vec2;
+  readonly health: number;
+}
+
+export const MAX_BASE_SKILL_LEVEL = 5;
 export const BASE_HEALTH_PER_SEGMENT = 125;
 
 export interface BaseHealthSegments {
@@ -39,17 +49,29 @@ const INITIAL_MAX_HEALTH = 1_000;
 const HEALTH_PER_VITALITY_LEVEL = 250;
 const REGENERATION_PER_LEVEL = 3;
 const RANGE_COMPARISON_EPSILON = 1e-9;
+const TARGET_DAMAGE_BY_LEVEL = [0, 220, 330, 480, 650, 850] as const;
+const TARGET_RANGE_BY_LEVEL = [0, 2.15, 2.4, 2.65, 2.9, 3.15] as const;
+const TARGET_ATTACK_INTERVAL_BY_LEVEL = [0, 1.2, 1.05, 0.9, 0.78, 0.68] as const;
+const BASE_ORIGIN: Vec2 = { x: 0, y: 0 };
+
+function normalizeBaseSkillLevel(level: number): number {
+  const finiteLevel = Number.isFinite(level) ? Math.floor(level) : 0;
+  return Math.min(MAX_BASE_SKILL_LEVEL, Math.max(0, finiteLevel));
+}
 
 export function getBaseStats(progression: BaseProgression): BaseStats {
-  const pulseLevel = progression.skills.areaPulse;
+  const vitalityLevel = normalizeBaseSkillLevel(progression.skills.vitality);
+  const regenerationLevel = normalizeBaseSkillLevel(
+    progression.skills.regeneration,
+  );
+  // The legacy `areaPulse` id now buys a high-damage, single-target attack.
+  const targetLevel = normalizeBaseSkillLevel(progression.skills.areaPulse);
   return {
-    maxHealth:
-      INITIAL_MAX_HEALTH +
-      progression.skills.vitality * HEALTH_PER_VITALITY_LEVEL,
-    regenerationPerSecond:
-      progression.skills.regeneration * REGENERATION_PER_LEVEL,
-    areaDamage: pulseLevel === 0 ? 0 : 40 + (pulseLevel - 1) * 25,
-    areaRadius: pulseLevel === 0 ? 0 : 1.35 + (pulseLevel - 1) * 0.25,
+    maxHealth: INITIAL_MAX_HEALTH + vitalityLevel * HEALTH_PER_VITALITY_LEVEL,
+    regenerationPerSecond: regenerationLevel * REGENERATION_PER_LEVEL,
+    targetDamage: TARGET_DAMAGE_BY_LEVEL[targetLevel],
+    targetRange: TARGET_RANGE_BY_LEVEL[targetLevel],
+    targetAttackIntervalSeconds: TARGET_ATTACK_INTERVAL_BY_LEVEL[targetLevel],
   };
 }
 
@@ -65,9 +87,8 @@ export function getBaseHealthSegments(
   };
 }
 
-export function createBaseProgression(skillPoints = 3): BaseProgression {
+export function createBaseProgression(): BaseProgression {
   const progression: BaseProgression = {
-    skillPoints,
     health: 0,
     skills: {
       vitality: 0,
@@ -83,10 +104,7 @@ export function canUpgradeBaseSkill(
   progression: BaseProgression,
   skill: BaseSkillId,
 ): boolean {
-  return (
-    progression.skillPoints > 0 &&
-    progression.skills[skill] < MAX_BASE_SKILL_LEVEL
-  );
+  return normalizeBaseSkillLevel(progression.skills[skill]) < MAX_BASE_SKILL_LEVEL;
 }
 
 export function upgradeBaseSkill(
@@ -98,8 +116,8 @@ export function upgradeBaseSkill(
   }
 
   const previousMaxHealth = getBaseStats(progression).maxHealth;
-  progression.skills[skill] += 1;
-  progression.skillPoints -= 1;
+  progression.skills[skill] =
+    normalizeBaseSkillLevel(progression.skills[skill]) + 1;
 
   if (skill === 'vitality') {
     progression.health +=
@@ -129,14 +147,60 @@ export function regenerateBase(
   return true;
 }
 
-export function isInsideBaseAttackRange(
+/** Whether a point can be selected by the base's single-target attack. */
+export function isInsideBaseTargetRange(
   progression: BaseProgression,
   point: Vec2,
 ): boolean {
   const stats = getBaseStats(progression);
   return (
-    stats.areaDamage > 0 &&
-    hyperbolicDistance({ x: 0, y: 0 }, point) <=
-      stats.areaRadius + RANGE_COMPARISON_EPSILON
+    stats.targetDamage > 0 &&
+    hyperbolicDistance(BASE_ORIGIN, point) <=
+      stats.targetRange + RANGE_COMPARISON_EPSILON
   );
+}
+
+function isValidTarget(target: BaseAttackTarget): boolean {
+  return (
+    typeof target.id === 'string' &&
+    Number.isFinite(target.health) &&
+    target.health > 0 &&
+    Number.isFinite(target.position.x) &&
+    Number.isFinite(target.position.y)
+  );
+}
+
+/**
+ * Locks the single most durable valid enemy in range. Exact health ties use
+ * H² distance, then ID, so targeting is stable no matter how the runtime
+ * orders the active-enemy list.
+ */
+export function selectBaseAttackTarget(
+  progression: BaseProgression,
+  targets: readonly BaseAttackTarget[],
+): BaseAttackTarget | null {
+  const inRange = targets.filter(
+    (target) =>
+      isValidTarget(target) &&
+      isInsideBaseTargetRange(progression, target.position),
+  );
+  if (inRange.length === 0) {
+    return null;
+  }
+
+  inRange.sort((left, right) => {
+    const healthDifference = right.health - left.health;
+    if (Math.abs(healthDifference) > RANGE_COMPARISON_EPSILON) {
+      return healthDifference;
+    }
+
+    const distanceDifference =
+      hyperbolicDistance(BASE_ORIGIN, left.position) -
+      hyperbolicDistance(BASE_ORIGIN, right.position);
+    if (Math.abs(distanceDifference) > RANGE_COMPARISON_EPSILON) {
+      return distanceDifference;
+    }
+    return left.id.localeCompare(right.id);
+  });
+  return inRange[0];
 }

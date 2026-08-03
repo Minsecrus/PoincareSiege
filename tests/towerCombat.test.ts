@@ -18,8 +18,8 @@ function tower(kind: CombatTower['kind'], position = pointAt(1)): CombatTower {
   return { kind, level: 1, position };
 }
 
-function enemy(id: string, position: Vec2): CombatEnemy {
-  return { id, position };
+function enemy(id: string, position: Vec2, health?: number): CombatEnemy {
+  return { id, position, health };
 }
 
 describe('tower combat', () => {
@@ -88,6 +88,33 @@ describe('tower combat', () => {
     expect(result.effects.every((effect) => Number.isInteger(effect.damage))).toBe(
       true,
     );
+  });
+
+  it('sniper attacks exactly one highest-health enemy in H² range', () => {
+    const result = resolveTowerCombat(tower('sniper', { x: 0, y: 0 }), [
+      enemy('low', pointAt(1.1), 80),
+      enemy('highest', pointAt(2.8), 600),
+      enemy('outside-range', pointAt(4.4), 9_000),
+      enemy('middle', pointAt(1.8), 340),
+    ]);
+
+    expect(result.targetIds).toEqual(['highest']);
+    expect(result.effects).toEqual([{ enemyId: 'highest', damage: 115 }]);
+  });
+
+  it('sniper resolves equal-health targets by H² distance, then ID', () => {
+    const fromOrigin = tower('sniper', { x: 0, y: 0 });
+    const byDistance = resolveTowerCombat(fromOrigin, [
+      enemy('far', pointAt(1.7), 300),
+      enemy('near', pointAt(0.7), 300),
+    ]);
+    const byId = resolveTowerCombat(fromOrigin, [
+      enemy('zeta', pointAt(1.2, Math.PI / 2), 300),
+      enemy('alpha', pointAt(1.2, 0), 300),
+    ]);
+
+    expect(byDistance.targetIds).toEqual(['near']);
+    expect(byId.targetIds).toEqual(['alpha']);
   });
 
   it('does not mutate its input enemy collection or resolve duplicate IDs twice', () => {

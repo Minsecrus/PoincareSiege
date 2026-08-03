@@ -127,6 +127,7 @@ describe('tower collection', () => {
       allyHeal: 0,
       attackSpeed: 0,
       fortify: 0,
+      knockback: 0,
     });
     expect(first.enchantments).not.toBe(second.enchantments);
 

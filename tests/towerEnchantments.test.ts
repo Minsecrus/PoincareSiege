@@ -15,12 +15,13 @@ import {
 } from '../src/game/towerEnchantments';
 
 describe('tower enchantments', () => {
-  it('starts every placed tower with four independent zero-rank enchantments', () => {
+  it('starts every placed tower with five independent zero-rank enchantments', () => {
     expect(TOWER_ENCHANTMENT_KINDS).toEqual([
       'selfRepair',
       'allyHeal',
       'attackSpeed',
       'fortify',
+      'knockback',
     ]);
     expect(TOWER_ENCHANTMENT_MAX_LEVEL).toBe(5);
     expect(createTowerEnchantmentLevels()).toEqual({
@@ -28,6 +29,7 @@ describe('tower enchantments', () => {
       allyHeal: 0,
       attackSpeed: 0,
       fortify: 0,
+      knockback: 0,
     });
     expect(createTowerEnchantmentLevels()).not.toBe(
       createTowerEnchantmentLevels(),
@@ -44,6 +46,9 @@ describe('tower enchantments', () => {
     expect(getTowerEnchantmentUpgradeCost('attackSpeed', 4)).toBe(380);
     expect(getTowerEnchantmentUpgradeCost('fortify', 1)).toBe(100);
     expect(getTowerEnchantmentUpgradeCost('fortify', 4)).toBe(300);
+    expect(getTowerEnchantmentUpgradeCost('knockback', 0)).toBe(80);
+    expect(getTowerEnchantmentUpgradeCost('knockback', 3)).toBe(260);
+    expect(getTowerEnchantmentUpgradeCost('knockback', 4)).toBe(360);
 
     for (const kind of TOWER_ENCHANTMENT_KINDS) {
       expect(
@@ -58,16 +63,19 @@ describe('tower enchantments', () => {
       allyHeal: 2,
       attackSpeed: 5,
       fortify: 1,
+      knockback: 4,
     };
 
     expect(getTowerEnchantmentInvestedCost('selfRepair', 3)).toBe(250);
     expect(getTowerEnchantmentInvestedCost('allyHeal', 2)).toBe(180);
     expect(getTowerEnchantmentInvestedCost('attackSpeed', 5)).toBe(1_080);
     expect(getTowerEnchantmentInvestedCost('fortify', 1)).toBe(60);
-    expect(getTowerEnchantmentsInvestedCost(levels)).toBe(1_570);
+    expect(getTowerEnchantmentInvestedCost('knockback', 4)).toBe(640);
+    expect(getTowerEnchantmentsInvestedCost(levels)).toBe(2_210);
     expect(TOWER_ENCHANTMENT_REFUND_RATE).toBe(0.5);
     expect(getTowerEnchantmentRefund('attackSpeed', 5)).toBe(540);
-    expect(getTowerEnchantmentsRefund(levels)).toBe(785);
+    expect(getTowerEnchantmentRefund('knockback', 5)).toBe(500);
+    expect(getTowerEnchantmentsRefund(levels)).toBe(1_105);
   });
 
   it('raises sale return by the same recovery fraction as further ranks are bought', () => {
@@ -89,11 +97,14 @@ describe('tower enchantments', () => {
     expect(normalizeTowerEnchantmentLevel(-4)).toBe(0);
     expect(normalizeTowerEnchantmentLevel(3.9)).toBe(3);
     expect(normalizeTowerEnchantmentLevel(99)).toBe(5);
-    expect(normalizeTowerEnchantmentLevels({ attackSpeed: 99 })).toEqual({
+    expect(
+      normalizeTowerEnchantmentLevels({ attackSpeed: 99, knockback: 3.9 }),
+    ).toEqual({
       selfRepair: 0,
       allyHeal: 0,
       attackSpeed: 5,
       fortify: 0,
+      knockback: 3,
     });
     expect(getTowerEnchantmentUpgradeCost('allyHeal', Number.NaN)).toBe(70);
     expect(getTowerEnchantmentInvestedCost('fortify', -1)).toBe(0);
@@ -107,6 +118,7 @@ describe('tower enchantments', () => {
       attackIntervalMultiplier: 1,
       maxHealthMultiplier: 1,
       damageTakenMultiplier: 1,
+      knockbackDistance: 0,
     });
 
     const effects = getTowerEnchantmentEffects({
@@ -114,6 +126,7 @@ describe('tower enchantments', () => {
       allyHeal: 3,
       attackSpeed: 4,
       fortify: 2,
+      knockback: 4,
     });
     expect(effects.selfRepairPerSecond).toBe(10);
     expect(effects.allyHealPerSecond).toBe(12);
@@ -121,5 +134,14 @@ describe('tower enchantments', () => {
     expect(effects.attackIntervalMultiplier).toBeCloseTo(1 / 1.56);
     expect(effects.maxHealthMultiplier).toBeCloseTo(1.24);
     expect(effects.damageTakenMultiplier).toBeCloseTo(0.88);
+    expect(effects.knockbackDistance).toBeCloseTo(0.34);
+  });
+
+  it('returns a conservative effective H² knockback distance at every rank', () => {
+    const distances = Array.from({ length: 6 }, (_, level) =>
+      getTowerEnchantmentEffects({ knockback: level }).knockbackDistance,
+    );
+
+    expect(distances).toEqual([0, 0.16, 0.21, 0.27, 0.34, 0.42]);
   });
 });

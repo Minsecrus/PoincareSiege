@@ -7,6 +7,7 @@ const NONE: TowerEnchantmentLevels = {
   allyHeal: 0,
   attackSpeed: 0,
   fortify: 0,
+  knockback: 0,
 };
 
 describe('tower maintenance', () => {

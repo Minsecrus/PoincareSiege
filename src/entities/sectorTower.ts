@@ -5,7 +5,13 @@ import * as THREE from 'three';
  * meshes rather than in the game rules, so rendering can stay independent from
  * attack behaviour.
  */
-export type TowerVisualKind = 'sector' | 'prism' | 'pulse' | 'anchor' | 'arc';
+export type TowerVisualKind =
+  | 'sector'
+  | 'prism'
+  | 'pulse'
+  | 'anchor'
+  | 'arc'
+  | 'sniper';
 
 export interface TowerMaterials {
   armor: THREE.MeshStandardMaterial;
@@ -355,6 +361,104 @@ function createArcVisual(materials: TowerMaterials): TowerVisual {
   return { group, head, core, levelIndicators };
 }
 
+/**
+ * A long, single-barrel precision emitter.  Its silhouette deliberately
+ * separates it from the broad multi-target towers: a compact stabilised base,
+ * two side rails, and one forward focusing ring all point down the same
+ * firing axis.  The materials stay in the scene's pale teal technology
+ * palette rather than falling back to a black gun body.
+ */
+function createSniperVisual(materials: TowerMaterials): TowerVisual {
+  const group = new THREE.Group();
+  addFoundation(group, materials);
+  addMesh(
+    group,
+    new THREE.CylinderGeometry(0.17, 0.255, 0.31, 6),
+    materials.armor,
+    [0, 0.265, 0],
+  );
+  addMesh(
+    group,
+    new THREE.CylinderGeometry(0.12, 0.155, 0.12, 6),
+    materials.energy,
+    [0, 0.465, 0],
+  );
+  const levelIndicators = addLevelIndicators(group, materials, [0, 0.265, 0.25]);
+
+  const head = new THREE.Group();
+  head.position.y = 0.54;
+  group.add(head);
+
+  // The elevated yoke makes the barrel feel braced rather than like a short
+  // cannon attached to the ground.
+  addMesh(
+    head,
+    new THREE.BoxGeometry(0.31, 0.1, 0.2),
+    materials.armor,
+    [0, 0.055, -0.03],
+  );
+  addMesh(
+    head,
+    new THREE.CylinderGeometry(0.115, 0.115, 0.05, 8),
+    materials.energy,
+    [0, 0.12, 0.01],
+  ).rotation.x = Math.PI / 2;
+
+  const barrel = addMesh(
+    head,
+    new THREE.CylinderGeometry(0.074, 0.092, 0.72, 8),
+    materials.dark,
+    [0, 0.14, 0.34],
+  );
+  barrel.rotation.x = Math.PI / 2;
+  const barrelChannel = addMesh(
+    head,
+    new THREE.BoxGeometry(0.052, 0.035, 0.61),
+    materials.energy,
+    [0, 0.205, 0.35],
+  );
+  barrelChannel.rotation.x = -0.055;
+
+  for (const side of [-1, 1]) {
+    const rail = addMesh(
+      head,
+      new THREE.BoxGeometry(0.04, 0.045, 0.62),
+      materials.armor,
+      [side * 0.118, 0.13, 0.35],
+    );
+    rail.rotation.x = -0.04;
+    addMesh(
+      head,
+      new THREE.BoxGeometry(0.07, 0.1, 0.13),
+      materials.dark,
+      [side * 0.15, 0.045, 0.12],
+    );
+  }
+
+  const focusingRing = addMesh(
+    head,
+    new THREE.TorusGeometry(0.13, 0.018, 6, 20),
+    materials.energy,
+    [0, 0.14, 0.57],
+  );
+  focusingRing.rotation.z = Math.PI / 8;
+  addMesh(
+    head,
+    new THREE.CylinderGeometry(0.105, 0.092, 0.11, 8),
+    materials.energy,
+    [0, 0.14, 0.73],
+  ).rotation.x = Math.PI / 2;
+
+  const core = addMesh(
+    head,
+    new THREE.OctahedronGeometry(0.09, 0),
+    materials.energy,
+    [0, 0.235, -0.09],
+  );
+  core.rotation.y = Math.PI / 4;
+  return { group, head, core, levelIndicators };
+}
+
 /** Creates the intentionally distinct visual silhouette for a tower kind. */
 export function createTowerVisual(
   kind: TowerVisualKind,
@@ -369,6 +473,8 @@ export function createTowerVisual(
       return createAnchorVisual(materials);
     case 'arc':
       return createArcVisual(materials);
+    case 'sniper':
+      return createSniperVisual(materials);
     case 'sector':
       return createSectorVisual(materials);
   }

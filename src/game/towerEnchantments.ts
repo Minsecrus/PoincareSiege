@@ -8,6 +8,7 @@ export const TOWER_ENCHANTMENT_KINDS = [
   'allyHeal',
   'attackSpeed',
   'fortify',
+  'knockback',
 ] as const;
 
 export type TowerEnchantmentKind = (typeof TOWER_ENCHANTMENT_KINDS)[number];
@@ -21,6 +22,7 @@ export interface TowerEnchantmentLevels {
   allyHeal: number;
   attackSpeed: number;
   fortify: number;
+  knockback: number;
 }
 
 /** Allows pure callers to calculate effects from a partial level snapshot. */
@@ -28,7 +30,7 @@ export type TowerEnchantmentLevelsInput = Readonly<
   Partial<TowerEnchantmentLevels>
 >;
 
-/** Combat-facing aggregate supplied by the four independent enchantments. */
+/** Combat-facing aggregate supplied by the five independent enchantments. */
 export interface TowerEnchantmentEffects {
   selfRepairPerSecond: number;
   allyHealPerSecond: number;
@@ -40,6 +42,8 @@ export interface TowerEnchantmentEffects {
   maxHealthMultiplier: number;
   /** Multiplies incoming damage; lower is more durable. */
   damageTakenMultiplier: number;
+  /** H² distance of a successful knockback. Zero means the effect is inactive. */
+  knockbackDistance: number;
 }
 
 type EnchantmentCosts = readonly [number, number, number, number, number];
@@ -50,11 +54,13 @@ const UPGRADE_COSTS: Record<TowerEnchantmentKind, EnchantmentCosts> = {
   allyHeal: [70, 110, 160, 240, 340],
   attackSpeed: [80, 140, 200, 280, 380],
   fortify: [60, 100, 160, 220, 300],
+  knockback: [80, 120, 180, 260, 360],
 };
 
 const SELF_REPAIR_PER_SECOND = [0, 2, 4, 6, 8, 10] as const;
 const ALLY_HEAL_PER_SECOND = [0, 4, 8, 12, 16, 20] as const;
 const ALLY_HEAL_RANGE = [0, 1.2, 1.35, 1.5, 1.65, 1.8] as const;
+const KNOCKBACK_DISTANCE = [0, 0.16, 0.21, 0.27, 0.34, 0.42] as const;
 
 /** Creates fresh mutable state so no two towers ever share enchantment state. */
 export function createTowerEnchantmentLevels(): TowerEnchantmentLevels {
@@ -63,6 +69,7 @@ export function createTowerEnchantmentLevels(): TowerEnchantmentLevels {
     allyHeal: 0,
     attackSpeed: 0,
     fortify: 0,
+    knockback: 0,
   };
 }
 
@@ -84,6 +91,7 @@ export function normalizeTowerEnchantmentLevels(
     allyHeal: normalizeTowerEnchantmentLevel(levels.allyHeal ?? 0),
     attackSpeed: normalizeTowerEnchantmentLevel(levels.attackSpeed ?? 0),
     fortify: normalizeTowerEnchantmentLevel(levels.fortify ?? 0),
+    knockback: normalizeTowerEnchantmentLevel(levels.knockback ?? 0),
   };
 }
 
@@ -165,5 +173,6 @@ export function getTowerEnchantmentEffects(
     attackIntervalMultiplier: 1 / (1 + normalized.attackSpeed * 0.14),
     maxHealthMultiplier: 1 + normalized.fortify * 0.12,
     damageTakenMultiplier: 1 - normalized.fortify * 0.06,
+    knockbackDistance: KNOCKBACK_DISTANCE[normalized.knockback],
   };
 }

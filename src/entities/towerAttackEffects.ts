@@ -1,4 +1,11 @@
 import * as THREE from 'three';
+import {
+  getPrecisionProjectileTiming,
+  getTowerAttackImpactDelays,
+  resolveTowerAttackEffectRange,
+  TOWER_ATTACK_EFFECT_TIMING,
+  type PrecisionProjectileStyle,
+} from '../game/towerAttackTiming';
 import type { TowerKind } from '../game/towerStats';
 import {
   IDENTITY_MOBIUS,
@@ -34,7 +41,15 @@ export interface TowerAttackEffectRequest {
   origin: Vec2;
   targets: readonly Vec2[];
   range?: number;
+  /**
+   * Precision attacks always resolve against one target. The base reuses the
+   * sniper channel with the larger `base-projectile` presentation, while
+   * ordinary sniper towers default to the compact projectile.
+   */
+  style?: PrecisionProjectileStyle;
 }
+
+export type { PrecisionProjectileStyle } from '../game/towerAttackTiming';
 
 export interface TowerAttackEffectsOptions {
   /** Safety cap for short-lived visuals during high-speed combat. */
@@ -172,26 +187,47 @@ function writeCanonicalPath(
   geometry.computeBoundingSphere();
 }
 
+function geodesicPoint(start: Vec2, end: Vec2, amount: number): Vec2 {
+  const startHyperboloid = poincareToHyperboloid(start);
+  const endHyperboloid = poincareToHyperboloid(end);
+  return hyperboloidToPoincare(
+    geodesicInterpolate(
+      startHyperboloid,
+      endHyperboloid,
+      clamp(amount, 0, 1),
+    ),
+  );
+}
+
 function sampleGeodesic(
   start: Vec2,
   end: Vec2,
   segments: number,
   amount = 1,
 ): Vec2[] {
-  const startHyperboloid = poincareToHyperboloid(start);
-  const endHyperboloid = poincareToHyperboloid(end);
   const safeSegments = Math.max(1, Math.floor(segments));
   const safeAmount = clamp(amount, 0, 1);
   const points: Vec2[] = [];
   for (let index = 0; index <= safeSegments; index += 1) {
+    points.push(geodesicPoint(start, end, (index / safeSegments) * safeAmount));
+  }
+  return points;
+}
+
+function sampleGeodesicSpan(
+  start: Vec2,
+  end: Vec2,
+  segments: number,
+  startAmount: number,
+  endAmount: number,
+): Vec2[] {
+  const safeSegments = Math.max(1, Math.floor(segments));
+  const from = clamp(startAmount, 0, 1);
+  const to = clamp(endAmount, from, 1);
+  const points: Vec2[] = [];
+  for (let index = 0; index <= safeSegments; index += 1) {
     points.push(
-      hyperboloidToPoincare(
-        geodesicInterpolate(
-          startHyperboloid,
-          endHyperboloid,
-          (index / safeSegments) * safeAmount,
-        ),
-      ),
+      geodesicPoint(start, end, from + ((to - from) * index) / safeSegments),
     );
   }
   return points;
@@ -204,14 +240,6 @@ function appendLineSegments(
   for (let index = 0; index < line.length - 1; index += 1) {
     destination.push(line[index], line[index + 1]);
   }
-}
-
-function targetRange(origin: Vec2, targets: readonly Vec2[], fallback: number): number {
-  const farthest = targets.reduce(
-    (range, target) => Math.max(range, hyperbolicDistance(origin, target)),
-    0,
-  );
-  return Math.max(fallback, farthest + 0.1);
 }
 
 function circleAtHyperbolicRadius(
@@ -275,7 +303,7 @@ function createSectorEffect(
   targets: readonly Vec2[],
   worldRadius: number,
 ): ActiveAttackEffect {
-  const duration = 0.28;
+  const duration = TOWER_ATTACK_EFFECT_TIMING.sector.durationSeconds;
   const group = createEffectGroup('tower-attack-sector');
   const geometry = new THREE.BufferGeometry();
   const material = createLineMaterial(0xffbf59);
@@ -291,7 +319,9 @@ function createSectorEffect(
     age: 0,
     update(viewTransform): void {
       const progress = effect.age / duration;
-      const revealed = easeOutCubic(progress * 3.2);
+      const revealed = easeOutCubic(
+        progress * TOWER_ATTACK_EFFECT_TIMING.sector.tracerRevealSpeed,
+      );
       const segments: Vec2[] = [];
       for (const target of visibleTargets) {
         appendLineSegments(segments, sampleGeodesic(origin, target, 4, revealed));
@@ -316,7 +346,13 @@ function createPrismEffect(
   targets: readonly Vec2[],
   worldRadius: number,
 ): ActiveAttackEffect {
-  const duration = 0.54;
+  const prismTiming = TOWER_ATTACK_EFFECT_TIMING.prism;
+  const duration = prismTiming.durationSeconds;
+  const impactDelays = getTowerAttackImpactDelays({
+    kind: 'prism',
+    origin,
+    targets,
+  });
   const group = createEffectGroup('tower-attack-prism');
   const terminalTarget = targets.reduce((farthest, target) =>
     hyperbolicDistance(origin, target) > hyperbolicDistance(origin, farthest)
@@ -377,6 +413,7 @@ function createPrismEffect(
     return {
       target,
       index,
+      arrivalSeconds: impactDelays[index] ?? 0,
       ringGeometry,
       ringMaterial,
       sigilGeometry,
@@ -393,7 +430,12 @@ function createPrismEffect(
       const beamFade = 1 - smoothStep(0.57, 1, progress);
       for (const layer of beamLayers) {
         const release = easeOutCubic(
-          clamp((progress - 0.08 - layer.delay) / 0.22, 0, 1),
+          clamp(
+            (progress - prismTiming.beamStartProgress - layer.delay) /
+              prismTiming.beamTravelProgress,
+            0,
+            1,
+          ),
         );
         writeCanonicalPath(
           layer.geometry,
@@ -440,8 +482,11 @@ function createPrismEffect(
       );
 
       for (const impact of impacts) {
-        const stagger = impact.index * 0.025;
-        const hitProgress = clamp((progress - 0.26 - stagger) / 0.48, 0, 1);
+        const hitProgress = clamp(
+          (effect.age - impact.arrivalSeconds) / (duration * 0.48),
+          0,
+          1,
+        );
         const hitOpacity =
           smoothStep(0, 0.1, hitProgress) *
           (1 - smoothStep(0.48, 1, hitProgress)) *
@@ -512,14 +557,29 @@ function createPulseEffect(
   requestedRange: number | undefined,
   worldRadius: number,
 ): ActiveAttackEffect {
-  const duration = 0.78;
-  const range =
-    Number.isFinite(requestedRange) && requestedRange! > 0
-      ? requestedRange!
-      : targetRange(origin, targets, 0.8);
+  const pulseTiming = TOWER_ATTACK_EFFECT_TIMING.pulse;
+  const duration = pulseTiming.durationSeconds;
+  const range = resolveTowerAttackEffectRange(
+    origin,
+    targets,
+    requestedRange,
+    pulseTiming.rangeFallback,
+  );
+  const impactDelays = getTowerAttackImpactDelays({
+    kind: 'pulse',
+    origin,
+    targets,
+    range,
+  });
   const group = createEffectGroup('tower-attack-pulse');
   const rings = [
-    { color: 0x57eaff, delay: 0, speed: 1.18, opacity: 0.9, height: 0.012 },
+    {
+      color: 0x57eaff,
+      delay: 0,
+      speed: pulseTiming.primaryRingSpeed,
+      opacity: 0.9,
+      height: 0.012,
+    },
     { color: 0xa4f9ff, delay: 0.105, speed: 1.32, opacity: 0.72, height: 0.03 },
     { color: 0x2f9fff, delay: 0.205, speed: 1.48, opacity: 0.48, height: 0.002 },
   ].map((definition) => {
@@ -547,7 +607,7 @@ function createPulseEffect(
     return {
       target,
       index,
-      arrival: clamp(hyperbolicDistance(origin, target) / Math.max(range, 0.001), 0, 1) / 1.18,
+      arrivalSeconds: impactDelays[index] ?? 0,
       ringGeometry,
       ringMaterial,
       shockGeometry,
@@ -596,7 +656,7 @@ function createPulseEffect(
 
       for (const impact of impacts) {
         const hitProgress = clamp(
-          (progress - impact.arrival - impact.index * 0.008) / 0.3,
+          (effect.age - impact.arrivalSeconds) / (duration * 0.3),
           0,
           1,
         );
@@ -665,11 +725,20 @@ function createAnchorEffect(
   requestedRange: number | undefined,
   worldRadius: number,
 ): ActiveAttackEffect {
-  const duration = 1.12;
-  const range =
-    Number.isFinite(requestedRange) && requestedRange! > 0
-      ? requestedRange!
-      : targetRange(origin, targets, 0.85);
+  const anchorTiming = TOWER_ATTACK_EFFECT_TIMING.anchor;
+  const duration = anchorTiming.durationSeconds;
+  const range = resolveTowerAttackEffectRange(
+    origin,
+    targets,
+    requestedRange,
+    anchorTiming.rangeFallback,
+  );
+  const impactDelays = getTowerAttackImpactDelays({
+    kind: 'anchor',
+    origin,
+    targets,
+    range,
+  });
   const group = createEffectGroup('tower-attack-anchor');
   const fieldOuterGeometry = new THREE.BufferGeometry();
   const fieldOuterMaterial = createLineMaterial(0x65f1b2);
@@ -703,6 +772,7 @@ function createAnchorEffect(
     return {
       target,
       index,
+      arrivalSeconds: impactDelays[index] ?? 0,
       ringGeometry,
       ringMaterial,
       sigilGeometry,
@@ -719,7 +789,10 @@ function createAnchorEffect(
       const progress = effect.age / duration;
       const settle = easeOutCubic(clamp(progress / 0.17, 0, 1));
       const fieldPulse = 0.965 + Math.sin(progress * Math.PI * 8) * 0.025;
-      const radius = range * (0.76 + 0.24 * settle) * fieldPulse;
+      const radius =
+        range *
+        (anchorTiming.initialRadiusFraction +
+          (1 - anchorTiming.initialRadiusFraction) * settle);
       const outerPoints = circleAtHyperbolicRadius(origin, radius, 8);
       const innerPoints = circleAtHyperbolicRadius(origin, radius * 0.55, 8);
       const latticeSegments: Vec2[] = [];
@@ -757,9 +830,9 @@ function createAnchorEffect(
         EFFECT_HEIGHT - 0.006,
       );
       const fieldOpacity = 1 - smoothStep(0.72, 1, progress);
-      fieldOuterMaterial.opacity = 0.78 * fieldOpacity;
-      fieldInnerMaterial.opacity = 0.66 * fieldOpacity;
-      fieldLatticeMaterial.opacity = 0.48 * fieldOpacity;
+      fieldOuterMaterial.opacity = 0.78 * fieldOpacity * fieldPulse;
+      fieldInnerMaterial.opacity = 0.66 * fieldOpacity * fieldPulse;
+      fieldLatticeMaterial.opacity = 0.48 * fieldOpacity * fieldPulse;
       updateFlash(
         sourceFlash,
         origin,
@@ -774,8 +847,13 @@ function createAnchorEffect(
         const restraintPulse =
           0.78 +
           Math.sin(progress * Math.PI * 7 + pulseOffset) * 0.18;
+        const contactProgress = clamp(
+          (effect.age - restraint.arrivalSeconds) / (duration * 0.13),
+          0,
+          1,
+        );
         const restraintOpacity =
-          fieldOpacity * smoothStep(0.04, 0.17, progress) * restraintPulse;
+          fieldOpacity * smoothStep(0, 1, contactProgress) * restraintPulse;
         const sigilRadius = 0.075 + 0.022 * Math.sin(progress * Math.PI * 6 + pulseOffset);
         writeCanonicalPath(
           restraint.ringGeometry,
@@ -887,7 +965,13 @@ function createArcEffect(
   targets: readonly Vec2[],
   worldRadius: number,
 ): ActiveAttackEffect {
-  const duration = 0.48;
+  const arcTiming = TOWER_ATTACK_EFFECT_TIMING.arc;
+  const duration = arcTiming.durationSeconds;
+  const impactDelays = getTowerAttackImpactDelays({
+    kind: 'arc',
+    origin,
+    targets,
+  });
   const group = createEffectGroup('tower-attack-arc');
   const arcs = [
     {
@@ -939,6 +1023,7 @@ function createArcEffect(
     return {
       target,
       index,
+      arrivalSeconds: impactDelays[index] ?? 0,
       ringGeometry,
       ringMaterial,
       sparkGeometry,
@@ -955,7 +1040,11 @@ function createArcEffect(
       const progress = effect.age / duration;
       const globalFade = 1 - smoothStep(0.57, 1, progress);
       for (const arc of arcs) {
-        const arcProgress = clamp((progress - arc.delay) / 0.42, 0, 1);
+        const arcProgress = clamp(
+          (progress - arc.delay) / arcTiming.propagationProgress,
+          0,
+          1,
+        );
         const path = createArcPath(
           origin,
           targets,
@@ -988,9 +1077,11 @@ function createArcEffect(
       );
 
       for (const impact of impacts) {
-        const arrival =
-          0.08 + ((impact.index + 1) / Math.max(1, impacts.length)) * 0.42;
-        const hitProgress = clamp((progress - arrival) / 0.28, 0, 1);
+        const hitProgress = clamp(
+          (effect.age - impact.arrivalSeconds) / (duration * 0.28),
+          0,
+          1,
+        );
         const hitOpacity =
           smoothStep(0, 0.075, hitProgress) *
           (1 - smoothStep(0.38, 1, hitProgress)) *
@@ -1046,6 +1137,334 @@ function createArcEffect(
         impact.flash.geometry.dispose();
         impact.flash.material.dispose();
       }
+    },
+  };
+  return effect;
+}
+
+/**
+ * A single visible projectile travelling along the resolved H² geodesic. The
+ * standard sniper round is compact and quick; the base uses the same physical
+ * rule with a much brighter core, two moving halo rings, and a larger local
+ * impact burst. Neither version leaves a continuous beam on the battlefield.
+ */
+function createPrecisionProjectileEffect(
+  origin: Vec2,
+  target: Vec2,
+  worldRadius: number,
+  style: PrecisionProjectileStyle,
+): ActiveAttackEffect {
+  const isBaseProjectile = style === 'base-projectile';
+  const projectileTiming = getPrecisionProjectileTiming(style);
+  const duration = projectileTiming.durationSeconds;
+  const flightEnd = projectileTiming.flightEndProgress;
+  const tailLength = isBaseProjectile ? 0.31 : 0.17;
+  const group = createEffectGroup(
+    isBaseProjectile
+      ? 'base-attack-core-projectile'
+      : 'tower-attack-sniper-projectile',
+  );
+
+  const createOrb = (color: number, renderOrder: number) => {
+    const geometry = new THREE.IcosahedronGeometry(1, 1);
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.renderOrder = renderOrder;
+    group.add(mesh);
+    return { mesh, geometry, material };
+  };
+  const updateOrb = (
+    orb: ReturnType<typeof createOrb>,
+    point: Vec2,
+    opacity: number,
+    radius: number,
+    height: number,
+  ) => {
+    const viewPoint = applyMobius(viewTransform, point);
+    orb.mesh.position.set(
+      viewPoint.x * worldRadius,
+      height,
+      -viewPoint.y * worldRadius,
+    );
+    const intrinsicScale = Math.max(0.08, 1 - vec2LengthSquared(viewPoint));
+    orb.mesh.scale.setScalar(radius * intrinsicScale);
+    orb.material.opacity = clamp(opacity, 0, 1);
+  };
+
+  let viewTransform = IDENTITY_MOBIUS;
+  const tailOuterGeometry = new THREE.BufferGeometry();
+  const tailOuterMaterial = createLineMaterial(
+    isBaseProjectile ? 0x62ffe1 : 0x46d9ff,
+  );
+  const tailOuter = new THREE.Line(tailOuterGeometry, tailOuterMaterial);
+  tailOuter.renderOrder = EFFECT_RENDER_ORDER;
+  const tailCoreGeometry = new THREE.BufferGeometry();
+  const tailCoreMaterial = createLineMaterial(
+    isBaseProjectile ? 0xe2fff7 : 0xdfffff,
+  );
+  const tailCore = new THREE.Line(tailCoreGeometry, tailCoreMaterial);
+  tailCore.renderOrder = EFFECT_RENDER_ORDER + 1;
+  const core = createOrb(isBaseProjectile ? 0xd6fff4 : 0xc8fbff, EFFECT_RENDER_ORDER + 3);
+  const halo = createOrb(isBaseProjectile ? 0x3ef0bf : 0x4ccdf2, EFFECT_RENDER_ORDER + 2);
+  const sourceFlash = createFlash(isBaseProjectile ? 0x8ffff0 : 0x8fdff7);
+  const impactFlash = createFlash(isBaseProjectile ? 0xf0ffb0 : 0xe2ffff);
+  const impactRingGeometry = new THREE.BufferGeometry();
+  const impactRingMaterial = createLineMaterial(
+    isBaseProjectile ? 0x9affd1 : 0x83eefa,
+  );
+  const impactRing = new THREE.LineLoop(impactRingGeometry, impactRingMaterial);
+  impactRing.renderOrder = EFFECT_RENDER_ORDER + 3;
+  const impactSparkGeometry = new THREE.BufferGeometry();
+  const impactSparkMaterial = createLineMaterial(
+    isBaseProjectile ? 0xffe47b : 0xa7ffff,
+  );
+  const impactSparks = new THREE.LineSegments(
+    impactSparkGeometry,
+    impactSparkMaterial,
+  );
+  impactSparks.renderOrder = EFFECT_RENDER_ORDER + 4;
+
+  const baseHaloRingGeometry = isBaseProjectile
+    ? new THREE.BufferGeometry()
+    : null;
+  const baseHaloRingMaterial = isBaseProjectile
+    ? createLineMaterial(0x78ffdb)
+    : null;
+  const baseHaloRing =
+    baseHaloRingGeometry && baseHaloRingMaterial
+      ? new THREE.LineLoop(baseHaloRingGeometry, baseHaloRingMaterial)
+      : null;
+  if (baseHaloRing) {
+    baseHaloRing.renderOrder = EFFECT_RENDER_ORDER + 2;
+  }
+  const baseSigilGeometry = isBaseProjectile
+    ? new THREE.BufferGeometry()
+    : null;
+  const baseSigilMaterial = isBaseProjectile
+    ? createLineMaterial(0xd9ff9e)
+    : null;
+  const baseSigil =
+    baseSigilGeometry && baseSigilMaterial
+      ? new THREE.LineSegments(baseSigilGeometry, baseSigilMaterial)
+      : null;
+  if (baseSigil) {
+    baseSigil.renderOrder = EFFECT_RENDER_ORDER + 4;
+  }
+  const baseImpactRingGeometry = isBaseProjectile
+    ? new THREE.BufferGeometry()
+    : null;
+  const baseImpactRingMaterial = isBaseProjectile
+    ? createLineMaterial(0xffdf83)
+    : null;
+  const baseImpactRing =
+    baseImpactRingGeometry && baseImpactRingMaterial
+      ? new THREE.LineLoop(baseImpactRingGeometry, baseImpactRingMaterial)
+      : null;
+  if (baseImpactRing) {
+    baseImpactRing.renderOrder = EFFECT_RENDER_ORDER + 2;
+  }
+
+  group.add(
+    tailOuter,
+    tailCore,
+    sourceFlash.mesh,
+    impactFlash.mesh,
+    impactRing,
+    impactSparks,
+  );
+  if (baseHaloRing && baseSigil && baseImpactRing) {
+    group.add(baseHaloRing, baseSigil, baseImpactRing);
+  }
+
+  const effect: ActiveAttackEffect = {
+    group,
+    duration,
+    age: 0,
+    update(nextViewTransform): void {
+      viewTransform = nextViewTransform;
+      const progress = effect.age / duration;
+      const flightProgress = clamp(progress / flightEnd, 0, 1);
+      const projectilePoint = geodesicPoint(origin, target, flightProgress);
+      const flightOpacity =
+        progress < flightEnd
+          ? 1 - smoothStep(0.9, 1, flightProgress)
+          : 0;
+      const tailStart = Math.max(0, flightProgress - tailLength);
+      const tailPath = sampleGeodesicSpan(
+        origin,
+        target,
+        isBaseProjectile ? 18 : 10,
+        tailStart,
+        flightProgress,
+      );
+      writeCanonicalPath(
+        tailOuterGeometry,
+        tailPath,
+        nextViewTransform,
+        worldRadius,
+        EFFECT_HEIGHT + 0.026,
+      );
+      writeCanonicalPath(
+        tailCoreGeometry,
+        tailPath,
+        nextViewTransform,
+        worldRadius,
+        EFFECT_HEIGHT + 0.058,
+      );
+      tailOuterMaterial.opacity =
+        (isBaseProjectile ? 0.92 : 0.72) * flightOpacity;
+      tailCoreMaterial.opacity = flightOpacity;
+      updateOrb(
+        halo,
+        projectilePoint,
+        (isBaseProjectile ? 0.54 : 0.42) * flightOpacity,
+        isBaseProjectile ? 0.19 : 0.11,
+        EFFECT_HEIGHT + 0.065,
+      );
+      updateOrb(
+        core,
+        projectilePoint,
+        flightOpacity,
+        isBaseProjectile ? 0.115 : 0.064,
+        EFFECT_HEIGHT + 0.095,
+      );
+
+      const sourceCharge = 1 - smoothStep(0.07, 0.34, progress);
+      updateFlash(
+        sourceFlash,
+        origin,
+        nextViewTransform,
+        worldRadius,
+        (isBaseProjectile ? 1 : 0.78) * sourceCharge,
+        (isBaseProjectile ? 0.18 : 0.09) * (0.8 + sourceCharge * 0.35),
+      );
+
+      if (
+        baseHaloRing &&
+        baseHaloRingGeometry &&
+        baseHaloRingMaterial &&
+        baseSigil &&
+        baseSigilGeometry &&
+        baseSigilMaterial
+      ) {
+        writeCanonicalPath(
+          baseHaloRingGeometry,
+          circleAtHyperbolicRadius(
+            projectilePoint,
+            0.075 + 0.035 * Math.sin(progress * Math.PI * 10),
+            20,
+          ),
+          nextViewTransform,
+          worldRadius,
+          EFFECT_HEIGHT + 0.112,
+        );
+        writeCanonicalPath(
+          baseSigilGeometry,
+          radialSigilSegments(
+            projectilePoint,
+            0.03,
+            0.13 + 0.035 * Math.sin(progress * Math.PI * 8),
+            6,
+            progress * Math.PI * 8,
+          ),
+          nextViewTransform,
+          worldRadius,
+          EFFECT_HEIGHT + 0.125,
+        );
+        baseHaloRingMaterial.opacity = 0.82 * flightOpacity;
+        baseSigilMaterial.opacity = 0.68 * flightOpacity;
+      }
+
+      const impactProgress = clamp(
+        (progress - flightEnd) / Math.max(0.001, 1 - flightEnd),
+        0,
+        1,
+      );
+      const impactOpacity =
+        smoothStep(0, 0.08, impactProgress) *
+        (1 - smoothStep(0.62, 1, impactProgress));
+      writeCanonicalPath(
+        impactRingGeometry,
+        circleAtHyperbolicRadius(
+          target,
+          (isBaseProjectile ? 0.1 : 0.045) +
+            (isBaseProjectile ? 0.23 : 0.095) * easeOutCubic(impactProgress),
+          isBaseProjectile ? 28 : 18,
+        ),
+        nextViewTransform,
+        worldRadius,
+        EFFECT_HEIGHT + 0.05,
+      );
+      writeCanonicalPath(
+        impactSparkGeometry,
+        radialSigilSegments(
+          target,
+          0.012,
+          (isBaseProjectile ? 0.26 : 0.1) * easeOutCubic(impactProgress),
+          isBaseProjectile ? 10 : 5,
+          Math.PI / 4 + progress * Math.PI * 4,
+        ),
+        nextViewTransform,
+        worldRadius,
+        EFFECT_HEIGHT + 0.08,
+      );
+      impactRingMaterial.opacity = (isBaseProjectile ? 0.98 : 0.82) * impactOpacity;
+      impactSparkMaterial.opacity = (isBaseProjectile ? 0.86 : 0.7) * impactOpacity;
+      updateFlash(
+        impactFlash,
+        target,
+        nextViewTransform,
+        worldRadius,
+        (isBaseProjectile ? 1 : 0.82) * impactOpacity,
+        (isBaseProjectile ? 0.2 : 0.085) +
+          (isBaseProjectile ? 0.18 : 0.08) * easeOutCubic(impactProgress),
+      );
+
+      if (baseImpactRing && baseImpactRingGeometry && baseImpactRingMaterial) {
+        writeCanonicalPath(
+          baseImpactRingGeometry,
+          circleAtHyperbolicRadius(
+            target,
+            0.16 + 0.34 * easeOutCubic(impactProgress),
+            32,
+          ),
+          nextViewTransform,
+          worldRadius,
+          EFFECT_HEIGHT + 0.034,
+        );
+        baseImpactRingMaterial.opacity = 0.72 * impactOpacity;
+      }
+    },
+    dispose(): void {
+      tailOuterGeometry.dispose();
+      tailOuterMaterial.dispose();
+      tailCoreGeometry.dispose();
+      tailCoreMaterial.dispose();
+      core.geometry.dispose();
+      core.material.dispose();
+      halo.geometry.dispose();
+      halo.material.dispose();
+      sourceFlash.geometry.dispose();
+      sourceFlash.material.dispose();
+      impactFlash.geometry.dispose();
+      impactFlash.material.dispose();
+      impactRingGeometry.dispose();
+      impactRingMaterial.dispose();
+      impactSparkGeometry.dispose();
+      impactSparkMaterial.dispose();
+      baseHaloRingGeometry?.dispose();
+      baseHaloRingMaterial?.dispose();
+      baseSigilGeometry?.dispose();
+      baseSigilMaterial?.dispose();
+      baseImpactRingGeometry?.dispose();
+      baseImpactRingMaterial?.dispose();
     },
   };
   return effect;
@@ -1131,6 +1550,14 @@ export class TowerAttackEffects {
         break;
       case 'arc':
         effect = createArcEffect(origin, targets, this.worldRadius);
+        break;
+      case 'sniper':
+        effect = createPrecisionProjectileEffect(
+          origin,
+          targets[0],
+          this.worldRadius,
+          request.style ?? 'sniper-projectile',
+        );
         break;
     }
 

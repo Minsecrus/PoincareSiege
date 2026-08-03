@@ -4,7 +4,7 @@ import {
   buildEnemyRoute,
   type EnemyRoute,
 } from './enemyRoutes';
-import type { EnemyWaveSpawn } from './enemyWavePlan';
+import type { CampaignWaveSpawn } from './campaignWaves';
 import {
   applyMobius,
   hyperbolicDistance,
@@ -43,7 +43,7 @@ function scaledHealth(
 
 /** Resolves one authored wave entry without introducing a wave-based speed. */
 export function createWaveEnemySpawn(
-  spawn: EnemyWaveSpawn,
+  spawn: CampaignWaveSpawn,
   entryAngle: number,
 ): EnemyRuntimeSpawn {
   return {
