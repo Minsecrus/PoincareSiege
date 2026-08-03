@@ -355,8 +355,10 @@ body {
 
 .game-result-card {
   display: grid;
-  width: 142px;
-  min-height: 142px;
+  grid-template-rows: 1fr auto;
+  gap: 10px;
+  width: 184px;
+  min-height: 156px;
   padding: 18px;
   border-radius: 22px;
   background:
@@ -405,6 +407,8 @@ body {
 
 .game-result-actions {
   display: flex;
+  width: 100%;
+  justify-content: center;
   gap: 10px;
 }
 

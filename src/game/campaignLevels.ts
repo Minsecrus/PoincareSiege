@@ -53,22 +53,22 @@ function defineLevel(
  * level adds at most one primary combat system before the final synthesis.
  */
 export const CAMPAIGN_LEVELS: readonly CampaignLevel[] = Object.freeze([
-  defineLevel('level-1', 220, {
+  defineLevel('level-1', 500, {
     towerKinds: ['sector'],
     enchantments: [],
     baseSkills: [],
   }),
-  defineLevel('level-2', 300, {
+  defineLevel('level-2', 500, {
     towerKinds: ['sector', 'prism'],
     enchantments: ['selfRepair'],
     baseSkills: [],
   }),
-  defineLevel('level-3', 380, {
+  defineLevel('level-3', 500, {
     towerKinds: ['sector', 'prism', 'pulse'],
     enchantments: ['selfRepair', 'attackSpeed'],
     baseSkills: ['vitality'],
   }),
-  defineLevel('level-4', 460, {
+  defineLevel('level-4', 500, {
     towerKinds: ['sector', 'prism', 'pulse', 'anchor'],
     enchantments: ['selfRepair', 'attackSpeed', 'fortify'],
     baseSkills: ['vitality', 'regeneration'],

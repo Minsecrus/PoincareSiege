@@ -21,7 +21,7 @@ describe('campaign levels', () => {
 
   it('makes level one a three-wave sector-only lesson with no upgrades systems', () => {
     const level = getCampaignLevel('level-1');
-    expect(level.initialResources).toBe(220);
+    expect(level.initialResources).toBe(500);
     expect(level.loadout).toEqual({
       towerKinds: ['sector'],
       enchantments: [],
@@ -34,6 +34,12 @@ describe('campaign levels', () => {
     expect(
       level.waves.flat().every((spawn) => spawn.routeBehavior === 'direct'),
     ).toBe(true);
+  });
+
+  it('starts each of the first four teaching levels with the same reserve', () => {
+    expect(CAMPAIGN_LEVELS.slice(0, 4).map((level) => level.initialResources)).toEqual([
+      500, 500, 500, 500,
+    ]);
   });
 
   it('unlocks towers, enchantments, and base skills in deliberate teaching order', () => {

@@ -1840,7 +1840,7 @@ export class PoincareScene {
     const simulationDelta = deltaTime * this.gameSpeed.multiplier;
     const isSimulating =
       !this.waveState.paused && this.battleResult === null;
-    if (isSimulating) {
+    if (this.battleResult === null && !this.pauseMenuOpen) {
       this.updateNavigation(deltaTime);
     }
 

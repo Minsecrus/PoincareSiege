@@ -5,6 +5,7 @@ import {
   type CampaignLevelId,
   type CampaignProgress,
 } from '../game/campaignProgress';
+import { HomeCodex } from './homeCodex';
 
 export type { CampaignLevelId } from '../game/campaignProgress';
 
@@ -182,6 +183,8 @@ export class HomeScreen {
   private readonly options: HomeScreenOptions;
   private readonly root: HTMLElement;
   private readonly levels: HTMLElement;
+  private readonly codex: HomeCodex;
+  private readonly codexButton: HTMLButtonElement;
   private progress: CampaignProgress;
   private entryTimer = 0;
   private isLaunching = false;
@@ -205,30 +208,28 @@ export class HomeScreen {
       </header>
       <div class="home-screen__copy">
         <p>守住圆心</p>
-        <button class="home-screen__launch" type="button" data-home-start aria-label="进入第一关">
-          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="m16 10 20 14-20 14V10Z" /></svg>
-          <span>战役</span>
+        <button class="home-screen__launch" type="button" data-home-codex-open aria-haspopup="dialog" aria-label="打开图鉴">
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="m24 3 17 10v22L24 45 7 35V13L24 3Zm0 8-10 6v14l10 6 10-6V17l-10-6Z" /><path d="M17 20h14v4H17zm0 8h14v4H17z" /></svg>
+          <span>图鉴</span>
         </button>
       </div>
       <nav class="home-screen__levels" aria-label="关卡选择">
         ${LEVELS.map((level) => createLevelMarkup(level, this.progress)).join('')}
       </nav>
-      <button class="home-screen__motion" type="button" data-home-motion aria-pressed="false" aria-label="切换主页动效">
-        <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 4a20 20 0 1 0 20 20A20 20 0 0 0 24 4Zm0 6a14 14 0 1 1-14 14A14 14 0 0 1 24 10Zm-3 5v18l13-9-13-9Z" /></svg>
-      </button>
     `;
     this.host.replaceChildren(this.root);
     this.levels = this.root.querySelector<HTMLElement>('.home-screen__levels')
       ?? (() => {
         throw new Error('Missing home level navigation.');
       })();
-    this.root
-      .querySelector<HTMLButtonElement>('[data-home-start]')
-      ?.addEventListener('click', this.onStart);
+    this.codexButton = this.root.querySelector<HTMLButtonElement>(
+      '[data-home-codex-open]',
+    ) ?? (() => {
+      throw new Error('Missing home codex button.');
+    })();
+    this.codex = new HomeCodex(this.root, this.progress);
+    this.codexButton.addEventListener('click', this.onOpenCodex);
     this.levels.addEventListener('click', this.onLevel);
-    this.root
-      .querySelector<HTMLButtonElement>('[data-home-motion]')
-      ?.addEventListener('click', this.onToggleMotion);
   }
 
   show(): void {
@@ -240,6 +241,7 @@ export class HomeScreen {
 
   hide(): void {
     window.clearTimeout(this.entryTimer);
+    this.codex.close();
     this.root.hidden = true;
   }
 
@@ -248,16 +250,19 @@ export class HomeScreen {
     this.levels.innerHTML = LEVELS.map((level) =>
       createLevelMarkup(level, this.progress),
     ).join('');
+    this.codex.setProgress(progress);
   }
 
   dispose(): void {
     window.clearTimeout(this.entryTimer);
+    this.codexButton.removeEventListener('click', this.onOpenCodex);
     this.levels.removeEventListener('click', this.onLevel);
+    this.codex.dispose();
     this.root.remove();
   }
 
-  private readonly onStart = (): void => {
-    this.launch('level-1');
+  private readonly onOpenCodex = (): void => {
+    this.codex.open(this.codexButton);
   };
 
   private readonly onLevel = (event: Event): void => {
@@ -274,12 +279,6 @@ export class HomeScreen {
       return;
     }
     this.launch(levelId);
-  };
-
-  private readonly onToggleMotion = (event: Event): void => {
-    const button = event.currentTarget as HTMLButtonElement;
-    const reducedMotion = this.root.classList.toggle('is-motion-reduced');
-    button.setAttribute('aria-pressed', String(reducedMotion));
   };
 
   private launch(levelId: CampaignLevelId): void {

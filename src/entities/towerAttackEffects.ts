@@ -577,11 +577,11 @@ function createPulseEffect(
       color: 0x57eaff,
       delay: 0,
       speed: pulseTiming.primaryRingSpeed,
-      opacity: 0.9,
+      opacity: 0.42,
       height: 0.012,
     },
-    { color: 0xa4f9ff, delay: 0.105, speed: 1.32, opacity: 0.72, height: 0.03 },
-    { color: 0x2f9fff, delay: 0.205, speed: 1.48, opacity: 0.48, height: 0.002 },
+    { color: 0xa4f9ff, delay: 0.105, speed: 1.32, opacity: 0.3, height: 0.03 },
+    { color: 0x2f9fff, delay: 0.205, speed: 1.48, opacity: 0.18, height: 0.002 },
   ].map((definition) => {
     const geometry = new THREE.BufferGeometry();
     const material = createLineMaterial(definition.color);
@@ -650,7 +650,7 @@ function createPulseEffect(
         origin,
         viewTransform,
         worldRadius,
-        0.82 * sourceIntensity,
+        0.3 * sourceIntensity,
         0.09 + 0.16 * easeOutCubic(progress * 3.2),
       );
 
@@ -687,14 +687,14 @@ function createPulseEffect(
           worldRadius,
           EFFECT_HEIGHT + 0.044,
         );
-        impact.ringMaterial.opacity = 0.82 * hitOpacity;
-        impact.shockMaterial.opacity = 0.56 * hitOpacity;
+        impact.ringMaterial.opacity = 0.34 * hitOpacity;
+        impact.shockMaterial.opacity = 0.2 * hitOpacity;
         updateFlash(
           impact.flash,
           impact.target,
           viewTransform,
           worldRadius,
-          0.8 * hitOpacity,
+          0.3 * hitOpacity,
           0.06 + 0.095 * easeOutCubic(hitProgress),
         );
       }

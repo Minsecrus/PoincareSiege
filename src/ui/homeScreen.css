@@ -330,30 +330,6 @@
   text-shadow: none;
 }
 
-.home-screen__motion {
-  position: absolute;
-  right: clamp(18px, 3vw, 42px);
-  bottom: clamp(18px, 3vw, 42px);
-  display: grid;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(8, 33, 43, 0.46);
-  color: rgba(165, 239, 227, 0.75);
-  cursor: pointer;
-  place-items: center;
-  transition: background 140ms ease, color 140ms ease;
-}
-
-.home-screen__motion svg { width: 18px; height: 18px; fill: currentColor; }
-.home-screen__motion:hover,
-.home-screen__motion:focus-visible { background: rgba(82, 219, 199, 0.22); color: #ddfff8; outline: none; }
-
-.home-screen.is-motion-reduced .home-disk,
-.home-screen.is-motion-reduced .home-disk__spiral { animation-play-state: paused; }
-
 @keyframes home-disk-breathe {
   from { opacity: 0.84; transform: scale(0.985) rotate(-0.4deg); }
   to { opacity: 1; transform: scale(1.008) rotate(0.4deg); }
