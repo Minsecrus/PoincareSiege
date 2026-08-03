@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#030711" />
+    <meta
+      name="description"
+      content="Poincaré Siege — a hyperbolic tower-defense battlefield built with Three.js."
+    />
+    <title>Poincaré Siege</title>
+  </head>
+  <body>
+    <main id="app">
+      <div id="scene" aria-label="Poincaré Siege 双曲战场"></div>
+      <div id="game-hud" class="game-hud" aria-label="游戏状态">
+        <div class="hud-base" aria-label="基地生命">
+          <svg
+            id="hud-base-icon"
+            class="hud-base__icon"
+            viewBox="0 0 48 48"
+            aria-hidden="true"
+          >
+            <path d="m24 3 17 10v22L24 45 7 35V13L24 3Zm0 8-10 6v14l10 6 10-6V17l-10-6Z" />
+            <path d="m24 15 8 5v9l-8 5-8-5v-9l8-5Z" />
+          </svg>
+          <div
+            id="hud-base-health"
+            class="hud-health-grid"
+            role="img"
+            aria-label="基地生命已满"
+          >
+            <i class="is-active"></i><i class="is-active"></i
+            ><i class="is-active"></i><i class="is-active"></i
+            ><i class="is-active"></i><i class="is-active"></i
+            ><i class="is-active"></i><i class="is-active"></i>
+          </div>
+        </div>
+
+        <div class="hud-wave" aria-label="波次与剩余敌人">
+          <button
+            id="start-wave"
+            class="hud-wave__metric hud-wave__start"
+            type="button"
+            aria-label="开始下一波"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="m9 11 15 13L9 37v-8l6-5-6-5v-8Zm15 0 15 13-15 13v-8l6-5-6-5v-8Z" />
+            </svg>
+            <span id="hud-wave-current">1</span><span class="hud-separator" aria-hidden="true">/</span
+            ><span id="hud-wave-total">20</span>
+          </button>
+          <span class="hud-wave__metric" aria-label="剩余敌人">
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M24 4 7 14v20l17 10 17-10V14L24 4Zm0 8 9 5-9 5-9-5 9-5Zm-10 12 7 4v8l-7-4v-8Zm13 12v-8l7-4v8l-7 4Z" />
+            </svg>
+            <span id="hud-enemy-count">0</span>
+          </span>
+          <span
+            id="hud-wave-countdown"
+            class="hud-wave__metric hud-wave__countdown"
+            role="timer"
+            aria-label="下一波倒计时"
+            hidden
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M13 6h22v5h-3v7.5L27.4 24 32 28.5V37h3v5H13v-5h3v-8.5l4.6-4.5-4.6-4.5V11h-3V6Zm8 5v6.5L24 20.4l3-2.9V11h-6Zm3 16.6-3 2.9V37h6v-6.5l-3-2.9Z" />
+            </svg>
+            <span id="hud-wave-countdown-value">0</span>
+          </span>
+          <button
+            id="game-speed"
+            class="hud-icon-button hud-icon-button--speed"
+            type="button"
+            aria-label="切换游戏速度"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M8 35v-3a16 16 0 0 1 32 0v3h-5v-3a11 11 0 0 0-22 0v3H8Z" />
+              <path d="m17 29 11-9 3 4-11 9-3-4Z" />
+            </svg>
+            <span id="game-speed-value">1×</span>
+          </button>
+        </div>
+
+        <div class="hud-actions">
+          <span id="hud-resources" class="hud-resource" aria-label="资源">
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M24 4 39 12v24l-15 8-15-8V12l15-8Zm0 8-7 4v16l7 4 7-4V16l-7-4Z" />
+              <path d="m24 17 5 3v8l-5 3-5-3v-8l5-3Z" />
+            </svg>
+            <span id="hud-resource-value" class="hud-resource__value">300</span>
+          </span>
+          <button
+            id="pause-game"
+            class="hud-icon-button"
+            type="button"
+            aria-label="暂停游戏"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M13 9h8v30h-8V9Zm14 0h8v30h-8V9Z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div
+        id="game-result-overlay"
+        class="game-result-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="游戏结果"
+        hidden
+      >
+        <div id="game-result-card" class="game-result-card" data-result="victory">
+          <div id="game-result-icon" class="game-result-icon" aria-hidden="true">
+            <svg class="game-result-icon__victory" viewBox="0 0 48 48">
+              <path d="m24 3 5.4 11 12.1 1.7-8.7 8.5 2.1 12-10.9-5.8-10.9 5.8 2.1-12-8.7-8.5L18.6 14 24 3Z" />
+              <path d="M13 41h22v4H13z" />
+            </svg>
+            <svg class="game-result-icon__defeat" viewBox="0 0 48 48">
+              <path d="m24 4 17 10v20L24 44 7 34V14L24 4Zm0 8-10 6v12l10 6 10-6V18l-10-6Z" />
+              <path d="M20 20h8v8h-8z" />
+            </svg>
+          </div>
+          <div class="game-result-actions">
+            <button
+              id="restart-game"
+              class="result-action"
+              type="button"
+              aria-label="重新开始"
+            >
+              <svg viewBox="0 0 48 48" aria-hidden="true">
+                <path d="M39 17V7l-5 5A18 18 0 1 0 41 29h-7a11 11 0 1 1-3-12l-5 5h13Z" />
+              </svg>
+            </button>
+            <button
+              id="continue-game"
+              class="result-action result-action--continue"
+              type="button"
+              aria-label="继续"
+            >
+              <svg viewBox="0 0 48 48" aria-hidden="true">
+                <path d="m13 10 22 14-22 14V10Z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div
+        id="build-menu"
+        class="build-menu"
+        role="menu"
+        aria-label="选择防御塔"
+        hidden
+      >
+        <button
+          id="build-sector-tower"
+          class="build-option"
+          type="button"
+          role="menuitem"
+          data-tower-kind="sector"
+          data-build-cost="100"
+          aria-label="建造扇形守卫，费用 100"
+        >
+          <span class="build-option__icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M13 35h22l-3 7H16l-3-7Z" />
+              <path d="M17 19h14v17H17z" />
+              <path d="m22 17 3-11 3 11h-6Z" />
+              <path d="M29 22h12v5H29z" />
+            </svg>
+          </span>
+          <span class="cost-badge" aria-hidden="true">
+            <span class="coin-dot"></span><span data-tower-build-cost>100</span>
+          </span>
+        </button>
+        <button
+          id="build-prism-tower"
+          class="build-option"
+          type="button"
+          role="menuitem"
+          data-tower-kind="prism"
+          data-build-cost="130"
+          aria-label="建造测地棱镜，费用 130"
+        >
+          <span class="build-option__icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="m24 5 14 10v18L24 43 10 33V15L24 5Zm0 7-8 6v12l8 6 8-6V18l-8-6Z" />
+              <path d="m24 12 8 18-8 6-8-6 8-18Z" />
+              <path d="m24 12 8 18-8-3-8 3 8-18Z" class="icon-cut" />
+            </svg>
+          </span>
+          <span class="cost-badge" aria-hidden="true">
+            <span class="coin-dot"></span><span data-tower-build-cost>130</span>
+          </span>
+        </button>
+        <button
+          id="build-pulse-tower"
+          class="build-option"
+          type="button"
+          role="menuitem"
+          data-tower-kind="pulse"
+          data-build-cost="150"
+          aria-label="建造双曲脉冲塔，费用 150"
+        >
+          <span class="build-option__icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path fill-rule="evenodd" d="M24 4a20 20 0 1 1 0 40 20 20 0 0 1 0-40Zm0 5a15 15 0 1 0 0 30 15 15 0 0 0 0-30Zm0 7a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z" />
+              <path d="M21 21h6v6h-6z" class="icon-cut" />
+            </svg>
+          </span>
+          <span class="cost-badge" aria-hidden="true">
+            <span class="coin-dot"></span><span data-tower-build-cost>150</span>
+          </span>
+        </button>
+        <button
+          id="build-anchor-tower"
+          class="build-option"
+          type="button"
+          role="menuitem"
+          data-tower-kind="anchor"
+          data-build-cost="120"
+          aria-label="建造滞流锚，费用 120"
+        >
+          <span class="build-option__icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M21 5h6v17h-6V5Zm-5 2a8 8 0 0 0 16 0h-5a3 3 0 0 1-6 0h-5Z" />
+              <path d="M10 25h8v5h-3a10 10 0 0 0 18 0h-3v-5h8v5h-3a15 15 0 0 1-30 0h-3v-5Z" />
+              <path d="M13 39h22v5H13z" />
+            </svg>
+          </span>
+          <span class="cost-badge" aria-hidden="true">
+            <span class="coin-dot"></span><span data-tower-build-cost>120</span>
+          </span>
+        </button>
+        <button
+          id="build-arc-tower"
+          class="build-option"
+          type="button"
+          role="menuitem"
+          data-tower-kind="arc"
+          data-build-cost="170"
+          aria-label="建造链式电弧塔，费用 170"
+        >
+          <span class="build-option__icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M26 3 11 26h11l-2 19 17-25H26l0-17Z" />
+              <path d="M7 19H3v-5h7v4H7v1Zm34 11h4v5h-7v-4h3v-1ZM8 37l-4-3 4-3 3 3-3 3Zm32-23-3-3 3-3 4 3-4 3Z" />
+            </svg>
+          </span>
+          <span class="cost-badge" aria-hidden="true">
+            <span class="coin-dot"></span><span data-tower-build-cost>170</span>
+          </span>
+        </button>
+      </div>
+      <div
+        id="hover-build-cost"
+        class="hover-build-cost"
+        aria-label="建造费用 100"
+        hidden
+      >
+        <svg viewBox="0 0 48 48" aria-hidden="true">
+          <path d="M24 4 39 12v24l-15 8-15-8V12l15-8Zm0 8-7 4v16l7 4 7-4V16l-7-4Z" />
+          <path d="m24 17 5 3v8l-5 3-5-3v-8l5-3Z" />
+        </svg>
+        <span id="hover-build-cost-value">100</span>
+      </div>
+      <div
+        id="tower-menu"
+        class="tower-menu"
+        role="menu"
+        aria-label="防御塔操作"
+        hidden
+      >
+        <div id="tower-menu-title" class="tower-level" aria-label="1 级">
+          <i class="is-active"></i><i></i><i></i>
+        </div>
+        <div class="tower-readout" aria-label="防御塔属性">
+          <span id="tower-health" class="tower-health-grid" aria-label="防御塔生命">
+            <i class="is-active"></i><i class="is-active"></i
+            ><i class="is-active"></i><i class="is-active"></i>
+          </span>
+          <span class="tower-readout__stat" aria-label="伤害">
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="m24 3 5 13 14 3-10 10 2 16-11-7-11 7 2-16L5 19l14-3 5-13Z" />
+            </svg>
+            <span id="tower-damage">18</span>
+          </span>
+          <span class="tower-readout__stat" aria-label="双曲射程">
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path fill-rule="evenodd" d="M24 4a20 20 0 1 1 0 40 20 20 0 0 1 0-40Zm0 6a14 14 0 1 0 0 28 14 14 0 0 0 0-28Zm0 7a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z" />
+            </svg>
+            <span id="tower-range">1.2</span>
+          </span>
+          <span class="tower-readout__stat" aria-label="攻击扇区角度">
+            <svg id="tower-special-icon" viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M24 5v19L7.6 33.5A20 20 0 0 0 44 24H24V5Z" />
+              <path d="M22 3h4v23h-4z" />
+            </svg>
+            <span id="tower-angle">60°</span>
+          </span>
+        </div>
+        <div
+          id="tower-enchantments"
+          class="tower-enchantments"
+          role="group"
+          aria-label="防御塔附魔"
+        >
+          <button
+            class="enchantment-option enchantment-option--repair"
+            type="button"
+            role="menuitem"
+            data-tower-enchantment="selfRepair"
+            aria-label="升级自我修复"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M39 13V5l-5 5A18 18 0 1 0 41 30h-7a11 11 0 1 1-3-15l-5 5h13v-7Z" />
+              <path d="M21 19h6v5h5v6h-5v5h-6v-5h-5v-6h5v-5Z" />
+            </svg>
+            <span class="enchantment-cost" aria-hidden="true">
+              <span class="coin-dot"></span><span data-tower-enchantment-cost>35</span>
+            </span>
+            <span
+              class="enchantment-level"
+              data-tower-enchantment-level
+              aria-hidden="true"
+            >
+              <i></i><i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+          <button
+            class="enchantment-option enchantment-option--heal"
+            type="button"
+            role="menuitem"
+            data-tower-enchantment="allyHeal"
+            aria-label="升级友军修复"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M23 41S7 32 7 19C7 10 18 6 24 14c6-8 17-4 17 5 0 13-13 22-18 22Z" />
+              <path class="icon-cut" d="M21 18h6v6h6v6h-6v6h-6v-6h-6v-6h6v-6Z" />
+              <path d="M7 37h8v5H7zM4 34h5v11H4z" />
+            </svg>
+            <span class="enchantment-cost" aria-hidden="true">
+              <span class="coin-dot"></span><span data-tower-enchantment-cost>45</span>
+            </span>
+            <span
+              class="enchantment-level"
+              data-tower-enchantment-level
+              aria-hidden="true"
+            >
+              <i></i><i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+          <button
+            class="enchantment-option enchantment-option--speed"
+            type="button"
+            role="menuitem"
+            data-tower-enchantment="attackSpeed"
+            aria-label="升级攻击速度"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M28 3 13 25h10l-2 20 16-24H27l1-18Z" />
+              <path d="M7 14h13v5H7zM3 23h13v5H3zM8 32h10v5H8z" />
+            </svg>
+            <span class="enchantment-cost" aria-hidden="true">
+              <span class="coin-dot"></span><span data-tower-enchantment-cost>40</span>
+            </span>
+            <span
+              class="enchantment-level"
+              data-tower-enchantment-level
+              aria-hidden="true"
+            >
+              <i></i><i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+          <button
+            class="enchantment-option enchantment-option--fortify"
+            type="button"
+            role="menuitem"
+            data-tower-enchantment="fortify"
+            aria-label="升级坚固"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="m24 3 16 7v12c0 11-6.7 18-16 23C14.7 40 8 33 8 22V10l16-7Zm0 8-9 4v7c0 6.8 3.6 12 9 15.6 5.4-3.6 9-8.8 9-15.6v-7l-9-4Z" />
+              <path d="M21 16h6v5h5v6h-5v5h-6v-5h-5v-6h5v-5Z" />
+            </svg>
+            <span class="enchantment-cost" aria-hidden="true">
+              <span class="coin-dot"></span><span data-tower-enchantment-cost>55</span>
+            </span>
+            <span
+              class="enchantment-level"
+              data-tower-enchantment-level
+              aria-hidden="true"
+            >
+              <i></i><i></i><i></i><i></i><i></i>
+            </span>
+          </button>
+        </div>
+        <div class="tower-actions">
+          <button
+            id="upgrade-tower"
+            class="action-button"
+            type="button"
+            role="menuitem"
+            aria-label="升级防御塔"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="m24 6 13 14h-8v10H19V20h-8L24 6Z" />
+              <path d="M12 34h24v7H12z" />
+            </svg>
+            <span id="tower-upgrade-cost" class="cost-badge">
+              <span class="coin-dot"></span
+              ><span id="tower-upgrade-cost-value">80</span>
+            </span>
+          </button>
+          <button
+            id="remove-tower"
+            class="action-button action-button--sell"
+            type="button"
+            role="menuitem"
+            aria-label="拆除防御塔，返还 50"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M13 18h22l-2 25H15l-2-25Zm6 5 1 14h3l-1-14h-3Zm7 0-1 14h3l1-14h-3Z" />
+              <path d="M10 12h28v6H10zm8-7h12l3 7H15l3-7Z" />
+            </svg>
+            <span class="cost-badge cost-badge--refund">
+              <span class="coin-dot"></span
+              ><span id="tower-refund-value">50</span>
+            </span>
+          </button>
+        </div>
+      </div>
+      <div
+        id="base-menu"
+        class="base-menu"
+        role="dialog"
+        aria-label="基地技能"
+        hidden
+      >
+        <div class="base-status">
+          <svg class="base-status__core" viewBox="0 0 48 48" aria-hidden="true">
+            <path d="m24 3 17 10v22L24 45 7 35V13L24 3Zm0 8-10 6v14l10 6 10-6V17l-10-6Z" />
+            <path d="m24 15 8 5v9l-8 5-8-5v-9l8-5Z" />
+          </svg>
+          <div
+            id="base-health"
+            class="base-health"
+            aria-label="基地生命已满"
+          >
+            <i class="is-active"></i><i class="is-active"></i
+            ><i class="is-active"></i><i class="is-active"></i
+            ><i class="is-active"></i><i class="is-active"></i
+            ><i class="is-active"></i><i class="is-active"></i>
+          </div>
+          <span class="skill-points" aria-label="技能点">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m12 2 3 6 7 .9-5 4.8 1.3 6.8L12 17.2l-6.3 3.3L7 13.7 2 8.9 9 8l3-6Z" />
+            </svg>
+            <span id="base-skill-points">3</span>
+          </span>
+        </div>
+        <div id="base-skills" class="base-skills">
+          <button
+            class="base-skill"
+            type="button"
+            data-base-skill="vitality"
+            aria-label="升级生命上限"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M24 42S7 33 7 19C7 10 18 6 24 14c6-8 17-4 17 5 0 14-17 23-17 23Z" />
+              <path class="icon-cut" d="M21 18h6v6h6v6h-6v6h-6v-6h-6v-6h6v-6Z" />
+            </svg>
+            <span class="skill-value">+250</span>
+            <span class="base-skill-cost" aria-hidden="true">
+              <span class="coin-dot"></span
+              ><span data-base-skill-cost>80</span>
+            </span>
+            <span class="skill-level" data-base-skill-level aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
+          </button>
+          <button
+            class="base-skill"
+            type="button"
+            data-base-skill="regeneration"
+            aria-label="升级基地回血"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M39 15V5l-4 4A18 18 0 1 0 40 30h-7a11 11 0 1 1-3-16l-5 5h14v-4Z" />
+            </svg>
+            <span id="base-regen" class="skill-value">+0</span>
+            <span class="base-skill-cost" aria-hidden="true">
+              <span class="coin-dot"></span
+              ><span data-base-skill-cost>80</span>
+            </span>
+            <span class="skill-level" data-base-skill-level aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
+          </button>
+          <button
+            class="base-skill"
+            type="button"
+            data-base-skill="areaPulse"
+            aria-label="升级基地范围攻击"
+          >
+            <svg viewBox="0 0 48 48" aria-hidden="true">
+              <path fill-rule="evenodd" d="M24 4a20 20 0 1 1 0 40 20 20 0 0 1 0-40Zm0 7a13 13 0 1 0 0 26 13 13 0 0 0 0-26Zm0 7a6 6 0 1 0 0 12 6 6 0 0 0 0-12Z" />
+            </svg>
+            <span id="base-area" class="skill-value">—</span>
+            <span class="base-skill-cost" aria-hidden="true">
+              <span class="coin-dot"></span
+              ><span data-base-skill-cost>80</span>
+            </span>
+            <span class="skill-level" data-base-skill-level aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
+          </button>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
