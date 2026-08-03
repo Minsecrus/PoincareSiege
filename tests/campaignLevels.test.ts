@@ -136,32 +136,42 @@ describe('campaign levels', () => {
       contactMultiplier: 1.08,
     });
     expect(levelSix.waves[9][0]).toMatchObject({
-      healthMultiplier: 8.2,
       contactMultiplier: 1.25,
     });
+    expect(levelSix.waves[9][0].healthMultiplier).toBeCloseTo(16.4);
     expect(levelSeven.waves[0][0]).toMatchObject({
       healthMultiplier: 5,
       contactMultiplier: 1.16,
     });
     expect(levelSeven.waves[11][0]).toMatchObject({
-      healthMultiplier: 18.2,
       contactMultiplier: 1.38,
     });
+    expect(levelSeven.waves[11][0].healthMultiplier).toBeCloseTo(36.4);
   });
 
-  it('keeps authored waves immutable, deterministic, and below the old 50x health ceiling', () => {
+  it('doubles health from wave nine without changing wave eight', () => {
+    const levelSix = getCampaignLevel('level-6');
+    const levelSeven = getCampaignLevel('level-7');
+
+    expect(levelSix.waves[7][0].healthMultiplier).toBe(7);
+    expect(levelSix.waves[8][0].healthMultiplier).toBeCloseTo(7.6 * 2);
+    expect(levelSeven.waves[7][0].healthMultiplier).toBe(12);
+    expect(levelSeven.waves[8][0].healthMultiplier).toBeCloseTo(13.4 * 2);
+  });
+
+  it('keeps authored waves immutable and deterministic', () => {
     const finalWave = getCampaignWavePlan('level-7', 12);
     expect(finalWave).toBe(getCampaignWavePlan('level-7', 12));
     expect(
       Math.max(...finalWave.map((spawn) => spawn.healthMultiplier)),
-    ).toBeCloseTo(27.3);
+    ).toBeCloseTo(54.6);
     expect(finalWave).toHaveLength(45);
     const boss = finalWave.find((spawn) => spawn.kind === 'boss');
     expect(boss).toMatchObject({
       contactMultiplier: 1.38,
       routeBehavior: 'direct',
     });
-    expect(boss?.healthMultiplier).toBeCloseTo(27.3);
+    expect(boss?.healthMultiplier).toBeCloseTo(54.6);
     const directRouteShare =
       finalWave.filter((spawn) => spawn.routeBehavior === 'direct').length /
       finalWave.length;

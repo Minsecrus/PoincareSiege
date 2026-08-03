@@ -22,6 +22,10 @@ interface SpawnDraft {
 
 type CampaignWavePlan = readonly CampaignWaveSpawn[];
 
+/** Keeps the late campaign challenging after the player's build is established. */
+const LATE_WAVE_START = 9;
+const LATE_WAVE_HEALTH_MULTIPLIER = 2;
+
 function draft(
   kind: EnemyKind,
   routeBehavior: EnemyRouteBehavior,
@@ -54,11 +58,14 @@ function wave(
   entries: readonly SpawnDraft[],
   contactMultiplier?: number,
 ): CampaignWavePlan {
+  const lateWaveHealthMultiplier =
+    waveNumber >= LATE_WAVE_START ? LATE_WAVE_HEALTH_MULTIPLIER : 1;
   return Object.freeze(
     entries.map(({ kind, routeBehavior, healthScale = 1 }, index) =>
       Object.freeze({
         kind,
-        healthMultiplier: healthMultiplier * healthScale,
+        healthMultiplier:
+          healthMultiplier * lateWaveHealthMultiplier * healthScale,
         ...(contactMultiplier === undefined ? {} : { contactMultiplier }),
         routeBehavior,
         routeSeed: level * 10_000 + waveNumber * 100 + index,
@@ -70,7 +77,7 @@ function wave(
 /**
  * Full authored campaign pacing. The early levels teach one interaction at a
  * time, while the final level combines the complete roster without returning
- * to the old 50× health curve.
+ * to a global wave-number health curve.
  */
 export const CAMPAIGN_WAVE_PLANS: Readonly<
   Record<CampaignLevelId, readonly CampaignWavePlan[]>
